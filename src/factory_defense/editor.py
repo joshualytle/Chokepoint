@@ -61,9 +61,26 @@ class ArsenalEditor:
     def seed(self, turrets: list[Turret]) -> None:
         """Load an existing loadout so the player edits from it rather than blank.
 
-        ``list(turrets)`` makes our own list; we never mutate the caller's.
+        ``list(turrets)`` makes our own list; we never mutate the caller's. This
+        does NOT charge the bank — use ``seed_purchase`` when the budget applies.
         """
         self.turrets = list(turrets)
+
+    def seed_purchase(self, turrets: list[Turret]) -> list[Turret]:
+        """Load turrets, paying for each from the bank in order.
+
+        Turrets that don't fit the remaining budget are skipped and returned, so
+        a too-expensive loadout deploys what it can afford and the UI can report
+        the rest. With no bank attached, everything is kept (free mode).
+        """
+        self.turrets = []
+        dropped: list[Turret] = []
+        for t in turrets:
+            if self.bank is None or self.bank.spend(gun_cost(t.gun)):
+                self.turrets.append(t)
+            else:
+                dropped.append(t)
+        return dropped
 
     def to_turrets(self) -> list[Turret]:
         """The turrets to hand to ``World.set_turrets`` (a fresh list)."""

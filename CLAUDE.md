@@ -27,19 +27,25 @@ Python alert-pipeline role. So:
 
 ```
 packets.py     alert KINDS + WAVES (flood/burst). Pure data.
-arsenal.py     Gun (static fire_rate, accepts set), Module (attach to upgrade),
-               Turret (carries its x/y), registries (@register_gun, register_module),
-               SYNERGIES, unlocked_at(wave). The drop-in library.
+arsenal.py     Gun (static fire_rate, accepts set, cost), Module (attach to upgrade,
+               cost), Turret (carries its x/y), registries (@register_gun,
+               register_module), gun_cost(), SYNERGIES, unlocked_at(wave). Drop-in.
+economy.py     Bank — credit balance with can_afford/spend/earn. Pure. Shared by
+               reference between World (income) and ArsenalEditor (spending).
 maps.py        GameMap owns path geometry + pos_at(). MAPS dict, multiple maps.
 simulation.py  World.step() — typed processing, per-kind KindStat, coverage_gaps(),
-               leveling. NO pygame. Fully tested.
+               leveling, owns the Bank + wave income. NO pygame. Fully tested.
+editor.py      ArsenalEditor — pure placement/economy state machine: select/queue,
+               place/equip/remove by click coords, seed_purchase a loadout. Tested.
 loadout.py     build_loadout(unlocked, slots) -> [Turret]. The player edits this.
-render.py      pygame: draw, tooltips, map switch, F5 hot-reload, L = LLM help.
+render.py      pygame: draw, tooltips, map switch, F5 hot-reload, L = LLM help,
+               E = in-game placement editor (drives ArsenalEditor).
 llm_assist.py  optional local-LLM diagnostics over stdlib urllib; degrades to a
                friendly message if no model is running. localhost only.
 ```
 
-Dependency direction: packets/arsenal/maps → simulation → (loadout, llm_assist) → render.
+Dependency direction: packets/arsenal/maps → economy → simulation →
+(editor, loadout, llm_assist) → render.
 
 ## Invariants — keep these true
 

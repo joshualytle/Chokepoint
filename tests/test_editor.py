@@ -201,6 +201,24 @@ def test_equip_charges_and_rejects_when_unaffordable():
     assert bank.balance == 10
 
 
+def test_seed_purchase_pays_for_affordable_and_drops_the_rest():
+    # budget fits the sieve (90) but not a second auditor (170)
+    ed, bank = banked_editor(100)
+    loadout = [Turret(0, 0, make_gun("sieve")), Turret(0, 0, make_gun("auditor"))]
+    dropped = ed.seed_purchase(loadout)
+    assert [t.gun.name for t in ed.to_turrets()] == ["sieve"]
+    assert [t.gun.name for t in dropped] == ["auditor"]
+    assert bank.balance == 100 - gun_cost(make_gun("sieve"))
+
+
+def test_seed_purchase_free_mode_keeps_everything():
+    ed = full_editor()  # no bank
+    loadout = [Turret(0, 0, make_gun("lance")), Turret(0, 0, make_gun("auditor"))]
+    dropped = ed.seed_purchase(loadout)
+    assert dropped == []
+    assert len(ed.to_turrets()) == 2
+
+
 def test_editor_and_world_share_one_bank_by_reference():
     from factory_defense.maps import MAPS
     from factory_defense.simulation import World

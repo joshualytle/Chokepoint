@@ -24,9 +24,35 @@ Requires Python 3.11+ and pygame 2.6+.
 | `[` `]`  | previous / next map                      |
 | `R`      | reset the run                            |
 | `P`      | pause / resume                           |
+| `E`      | toggle the in-game placement editor      |
 | `F5`     | reload your `loadout.py` (after editing) |
 | `L`      | ask your local LLM for help (optional)   |
 | hover    | a turret or legend swatch → tooltip      |
+
+## Two ways to build a loadout
+
+You can compose turrets **in the file** (`loadout.py`, below) or **in-game**
+with the placement editor — press `E`. In the editor:
+
+- Click a gun in the palette (or press `1`–`9`) to select it, click module rows
+  to queue upgrades onto it, then **left-click the map** to place.
+- **Left-click an existing turret** to equip your queued modules onto it.
+- **Right-click** a turret to remove it (full refund).
+
+Both paths run through the same budget: `loadout.py` is your *initial paid
+build*, and the editor spends from the same credits for changes.
+
+## Credits — design under a budget
+
+Every gun and module has a credit **cost** (shown in tooltips and the palette).
+You start with a fixed budget and **earn more each time you clear a wave**, with
+income scaling up as waves intensify — so your defenses scale with the threat.
+The constraint is *peak* deployment: everything live at once must fit your
+balance. Removing a turret refunds it in full, so you're free to rearrange — the
+puzzle is covering every kind with enough throughput **for the fewest credits**.
+
+This is the pipeline lesson in disguise: you don't get unlimited consumers or
+throughput, so you size typed consumers to the load instead of over-provisioning.
 
 ## The one file you edit: `loadout.py`
 

@@ -65,6 +65,7 @@ def main() -> None:  # pragma: no cover - needs a display
     PHOS = (56, 225, 176)
     DANGER = (229, 85, 110)
     GATE_C = (240, 200, 120)
+    AMBER = (242, 200, 90)
 
     map_i = 0
     difficulty_i = 0
@@ -247,20 +248,30 @@ def main() -> None:  # pragma: no cover - needs a display
         # ---- topology: edges, then nodes with their queues ----
         for src, dst in world.map.edges():
             pygame.draw.line(screen, (42, 66, 89), world.map.pos(src), world.map.pos(dst), 12)
+        worst_node, worst_depth = None, 0  # the live bottleneck this frame
         for nid, node in world.map.nodes.items():
             q = world.queue_at(nid)
+            depth = len(q)
             nx, ny = int(node.x), int(node.y)
             if nid == world.map.sink:
                 pygame.draw.rect(screen, DANGER, (nx - 8, ny - 20, 7, 40))
-            depth_c = DANGER if len(q) > QUEUE_WARN else MUTED
-            pygame.draw.circle(screen, depth_c, (nx, ny), 5)
-            if q:
-                text(str(len(q)), nx + 7, ny - 7, F_S, depth_c)
+            # live load heat: green when clear, amber as it fills, red near overflow
+            frac = depth / QUEUE_CAP
+            load_c = PHOS if frac < 0.34 else (AMBER if frac < 0.67 else DANGER)
+            pygame.draw.circle(screen, load_c, (nx, ny), 5 + min(depth, QUEUE_CAP))
+            if depth:
+                text(str(depth), nx + 9, ny - 7, F_S, load_c)
+            if depth > worst_depth:
+                worst_node, worst_depth = (nx, ny), depth
             # queued packets stacked beside the node (size shrinks as volume drains)
             for j, p in enumerate(q):
                 r = max(3, int(6 * p.volume / p.maxvol))
                 pygame.draw.circle(screen, KINDS[p.kind]["color"],
-                                   (nx + 12 + (j % 4) * 8, ny - 12 + (j // 4) * 8), r)
+                                   (nx + 14 + (j % 4) * 8, ny - 14 + (j // 4) * 8), r)
+        # call out the current bottleneck once it's genuinely backing up
+        if worst_node is not None and worst_depth > QUEUE_WARN:
+            pygame.draw.circle(screen, DANGER, worst_node, 22, 2)
+            text("BOTTLENECK", worst_node[0] - 34, worst_node[1] + 24, F_S, DANGER)
 
         hovered_turret = None
         for t in world.turrets:

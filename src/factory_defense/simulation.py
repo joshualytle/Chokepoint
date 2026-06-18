@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from .arsenal import Turret, compute_synergy_mult, unlocked_at
 from .economy import Bank
 from .maps import GameMap
-from .packets import KIND_LIST, WAVES, Packet, synth_wave
+from .packets import DIFFICULTIES, KIND_LIST, WAVES, Packet
 
 PACKET_VOLUME = 12.0
 PACKET_SPEED = 60.0
@@ -39,9 +39,15 @@ class KindStat:
 class World:
     """Runs one game on a given map with a given set of placed turrets."""
 
-    def __init__(self, game_map: GameMap, starting_credits: int = STARTING_CREDITS):
+    def __init__(
+        self,
+        game_map: GameMap,
+        starting_credits: int = STARTING_CREDITS,
+        difficulty: str = "easy",
+    ):
         self.map = game_map
         self.turrets: list[Turret] = []
+        self.difficulty = difficulty
         self.starting_credits = starting_credits
         # Created once and kept across resets; the editor holds this same object
         # by reference, so resetting must refill it (in reset) rather than swap it.
@@ -91,7 +97,11 @@ class World:
         return seen - set(self.coverage())
 
     def load_wave(self, i: int) -> None:
-        groups = WAVES[i] if i < len(WAVES) else synth_wave(i)
+        # The active difficulty strategy decides the next wave's groups, reading
+        # how much of each kind has leaked so far (used by the adaptive profile).
+        leaked = {k: s.leaked for k, s in self.stats.items()}
+        strategy = DIFFICULTIES.get(self.difficulty, DIFFICULTIES["easy"])
+        groups = strategy(i, leaked)
         q: list[tuple[float, str]] = []
         for kind, count, gap, delay in groups:
             for k in range(count):

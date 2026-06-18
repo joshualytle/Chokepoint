@@ -7,6 +7,7 @@ Controls:
   [ / ]   previous / next map        R   reset
   P       pause / resume             F5  reload your loadout.py
   E       toggle the placement editor (buy/place/equip/remove turrets)
+  D       cycle difficulty (easy / adaptive / overkill) — resets the run
   L       ask your local LLM for help (optional; off-thread, never freezes)
   hover   a turret or a legend swatch for a tooltip
 
@@ -27,7 +28,7 @@ from . import loadout as loadout_mod
 from .arsenal import MODULE_LIBRARY, gun_cost, make_gun
 from .editor import ArsenalEditor
 from .maps import GW, MAP_LIST, MAPS
-from .packets import KINDS
+from .packets import DIFFICULTY_LIST, KINDS
 from .simulation import MAX_LEAK, World
 
 
@@ -56,7 +57,8 @@ def main() -> None:  # pragma: no cover - needs a display
     DANGER = (229, 85, 110)
 
     map_i = 0
-    world = World(MAPS[MAP_LIST[map_i]])
+    difficulty_i = 0
+    world = World(MAPS[MAP_LIST[map_i]], difficulty=DIFFICULTY_LIST[difficulty_i])
     editor = ArsenalEditor(world.unlocked(), bank=world.bank)
     edit_mode = False
     # palette rows registered each frame so panel clicks can be mapped to actions:
@@ -89,7 +91,7 @@ def main() -> None:  # pragma: no cover - needs a display
     def switch_map(delta: int) -> None:
         nonlocal map_i, world, edit_mode
         map_i = (map_i + delta) % len(MAP_LIST)
-        world = World(MAPS[MAP_LIST[map_i]])
+        world = World(MAPS[MAP_LIST[map_i]], difficulty=DIFFICULTY_LIST[difficulty_i])
         edit_mode = False
         deploy_loadout()
 
@@ -150,6 +152,11 @@ def main() -> None:  # pragma: no cover - needs a display
                     llm_state["text"] = "Loadout reloaded."
                 elif ev.key == pygame.K_e:
                     edit_mode = not edit_mode
+                elif ev.key == pygame.K_d:
+                    difficulty_i = (difficulty_i + 1) % len(DIFFICULTY_LIST)
+                    world.difficulty = DIFFICULTY_LIST[difficulty_i]
+                    world.reset()
+                    deploy_loadout()
                 elif ev.key == pygame.K_l:
                     ask_llm()
                 elif edit_mode and pygame.K_1 <= ev.key <= pygame.K_9:
@@ -236,6 +243,7 @@ def main() -> None:  # pragma: no cover - needs a display
         if world.intermission > 0 and not world.over:
             text(f"Wave {world.level} incoming...", GW // 2 - 70, 14, F_M, INK)
         text(f"map: {world.map.name}   [ ] to switch", 12, WIN_H - 22, F_S, MUTED)
+        text(f"mode: {world.difficulty}   D to cycle", 12, WIN_H - 40, F_S, MUTED)
 
         # ---- panel ----
         text("PACKET DEFENSE", PANEL_X, 16, F_M, PHOS)

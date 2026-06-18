@@ -26,7 +26,8 @@ Python alert-pipeline role. So:
 ## Architecture
 
 ```
-packets.py     alert KINDS + WAVES (flood/burst). Pure data.
+packets.py     alert KINDS + WAVES (flood/burst), plus difficulty strategies
+               (easy/adaptive/overkill) in the DIFFICULTIES registry. Pure data.
 arsenal.py     Gun (static fire_rate, accepts set, cost), Module (attach to upgrade,
                cost), Turret (carries its x/y), registries (@register_gun,
                register_module), gun_cost(), SYNERGIES, unlocked_at(wave). Drop-in.
@@ -64,17 +65,26 @@ Dependency direction: packets/arsenal/maps → economy → simulation →
 ```bash
 make install   # pip install -e ".[dev]"
 make run       # launch
-make check     # ruff + mypy + pytest (15 tests)
+make check     # ruff + mypy + pytest
 ```
 
 ## Roadmap (good next tasks)
 
-1. **In-game arsenal/placement editor** so the player composes loadouts without
-   editing the file (currently loadout.py + F5). Teaches event handling + state.
-2. **More content**: new guns/modules/maps via the registries; new packet kinds.
-3. **Adaptive waves**: synthesize the next wave from which kinds leaked most —
-   pressure the player's weakest coverage. Mostly dict analysis.
-4. **Richer synergies / clearer unlock UI.**
+Done: in-game placement editor (`editor.py`), credit economy (`economy.py`),
+difficulty strategies incl. adaptive waves (`packets.DIFFICULTIES`).
+
+**Direction — topological v2.** The game is pivoting from a spatial tower-defense
+(turrets target by x/y range along a fixed polyline) toward a *flow network*:
+one map that grows **branches** you design; **gates** that route/pre-filter
+packets by kind (Lambda-style) between branches; turrets that **drain a node's
+queue** rather than target by range; and **queue dwell that bleeds health**
+(SLA/backpressure) as the failure mode instead of leak-at-exit. Build it in
+phases behind the pure/tested core: graph+queues → turrets-serve-queues → gates
+→ latency-drain → branch-building UI. The economy/Bank/editor state machine and
+registries all carry over; spatial `range` fades.
+
+Smaller wins still open: more content (guns/modules/kinds) via the registries;
+richer synergies / clearer unlock UI.
 
 Touch the pure modules for behavior (with tests), then render.py for UI. Keep
 them separable.

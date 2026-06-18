@@ -8,6 +8,7 @@ bursts? Uncovered kinds flood straight through to the exit.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 # kind -> presentation + tooltip text. Colors are RGB.
@@ -59,3 +60,55 @@ def synth_wave(i: int) -> list[tuple[str, int, float, float]]:
         ("cloudtrail", i, 0.4, 2.0),
         ("auth", 10 + i, 0.4, 0.0),
     ]
+
+
+# --------------------------------------------------------------------------- #
+#  Difficulty strategies — load profiles for the next wave
+# --------------------------------------------------------------------------- #
+#
+# Each strategy is a pure function (wave_idx, leaked) -> spawn groups, where
+# ``leaked`` is how many of each kind have leaked so far. Overkill and Adaptive
+# transform the Easy baseline, so kinds stay introduced sanely (the curated
+# WAVES still drive what appears when) and Adaptive only amplifies kinds that
+# have actually shown up. A "Wave" is a list of (kind, count, gap, delay) groups.
+
+Wave = list[tuple[str, int, float, float]]
+WaveStrategy = Callable[[int, dict[str, int]], Wave]
+
+
+def easy_wave(wave_idx: int, leaked: dict[str, int]) -> Wave:
+    """Steady ramp: the curated intro, then the gentle endless tail. The default."""
+    return WAVES[wave_idx] if wave_idx < len(WAVES) else synth_wave(wave_idx)
+
+
+def overkill_wave(wave_idx: int, leaked: dict[str, int]) -> Wave:
+    """Crank the Easy baseline: ~60% more volume per group and tighter gaps."""
+    return [
+        (kind, max(1, round(count * 1.6)), gap * 0.6, delay)
+        for kind, count, gap, delay in easy_wave(wave_idx, leaked)
+    ]
+
+
+def adaptive_wave(wave_idx: int, leaked: dict[str, int]) -> Wave:
+    """Press the weak spot: add a burst of whichever kind has leaked the most.
+
+    If nothing has leaked yet, it's just the Easy baseline. Once a kind starts
+    slipping through, the next wave concentrates a tight burst of it — the load
+    generator probing your coverage gap.
+    """
+    base = easy_wave(wave_idx, leaked)
+    worst_leak = max(leaked.values(), default=0)
+    if worst_leak <= 0:
+        return base
+    # max(..., key=leaked.get) picks the kind name with the highest leak count
+    worst_kind = max(leaked, key=lambda k: leaked[k])
+    burst = (worst_kind, 8 + wave_idx, 0.25, 0.5)
+    return [*base, burst]
+
+
+DIFFICULTIES: dict[str, WaveStrategy] = {
+    "easy": easy_wave,
+    "adaptive": adaptive_wave,
+    "overkill": overkill_wave,
+}
+DIFFICULTY_LIST: list[str] = list(DIFFICULTIES)

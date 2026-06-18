@@ -25,6 +25,7 @@ Requires Python 3.11+ and pygame 2.6+.
 | `R`      | reset the run                            |
 | `P`      | pause / resume                           |
 | `E`      | toggle the in-game placement editor      |
+| `D`      | cycle difficulty (easy/adaptive/overkill)|
 | `F5`     | reload your `loadout.py` (after editing) |
 | `L`      | ask your local LLM for help (optional)   |
 | hover    | a turret or legend swatch → tooltip      |
@@ -53,6 +54,17 @@ puzzle is covering every kind with enough throughput **for the fewest credits**.
 
 This is the pipeline lesson in disguise: you don't get unlimited consumers or
 throughput, so you size typed consumers to the load instead of over-provisioning.
+
+## Difficulty (press `D` to cycle)
+
+Three load profiles for the incoming flood:
+
+- **easy** — a steady ramp; the curated intro waves then a gentle endless tail.
+- **adaptive** — presses your weak spot: the next wave piles on whichever kind
+  has leaked the most so far. A load generator probing your coverage gap.
+- **overkill** — more volume and tighter bursts across the board.
+
+Cycling difficulty resets the run.
 
 ## The one file you edit: `loadout.py`
 

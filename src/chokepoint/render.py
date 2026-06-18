@@ -17,8 +17,9 @@ Controls:
 Editor (press E): click a gun in the palette (or 1-9) to select it, click a
 module row to queue it, then left-click the map to place. Left-click an existing
 turret to equip your queued modules onto it; right-click to remove (full refund).
-Pick the gate router (click it or press G) and left-click near a fork to place a
-gate; it auto-routes each kind to the branch whose consumers can handle it.
+Pick the gate router (G) and left-click near a fork to place a gate; it
+auto-routes each kind to the branch whose consumers can handle it. Pick the
+quelimiter (B) and left-click a node to place a buffer that smooths a burst.
 Everything is charged against your credits, which grow as you clear waves.
 """
 
@@ -33,6 +34,7 @@ from . import loadout as loadout_mod
 from .arsenal import GUN_LIBRARY, MODULE_LIBRARY, gun_cost, make_gun
 from .editor import ArsenalEditor
 from .gates import DEFAULT_GATE_COST
+from .limiter import DEFAULT_LIMITER_COST
 from .maps import GW, MAP_LIST, MAPS
 from .metrics import summarize_failure
 from .packets import DIFFICULTY_LIST, KINDS
@@ -92,14 +94,19 @@ def main() -> None:  # pragma: no cover - needs a display
                 world.bank.earn(gun_cost(t.gun))
             for gt in world.gates:
                 world.bank.earn(gt.cost)
+            for lm in world.limiters:
+                world.bank.earn(lm.cost)
         editor = ArsenalEditor(world.unlocked(), bank=world.bank)
         dropped = editor.seed_purchase(
             loadout_mod.build_loadout(world.unlocked(), world.map.slots)
         )
-        # gates are optional in a saved loadout (older files have no build_gates)
+        # gates / limiters are optional in a saved loadout (older files lack them)
         build_gates = getattr(loadout_mod, "build_gates", None)
         if build_gates is not None:
             editor.seed_purchase_gates(build_gates(world.unlocked(), world.map.slots))
+        build_limiters = getattr(loadout_mod, "build_limiters", None)
+        if build_limiters is not None:
+            editor.seed_purchase_limiters(build_limiters(world.unlocked(), world.map.slots))
         sync_world()
         if dropped:
             llm_state["text"] = (
@@ -107,9 +114,10 @@ def main() -> None:  # pragma: no cover - needs a display
             )
 
     def sync_world() -> None:
-        """Push the editor's turrets + gates to the world and re-derive routing."""
+        """Push the editor's turrets, gates, and limiters to the world; re-route."""
         world.set_turrets(editor.to_turrets())
         world.set_gates(editor.to_gates())
+        world.set_limiters(editor.to_limiters())
         world.autoroute()
 
     def switch_map(delta: int) -> None:
@@ -197,6 +205,8 @@ def main() -> None:  # pragma: no cover - needs a display
                     ask_llm()
                 elif edit_mode and ev.key == pygame.K_g:
                     editor.select_gate()  # gate-placement mode
+                elif edit_mode and ev.key == pygame.K_b:
+                    editor.select_limiter()  # quelimiter (buffer) placement mode
                 elif edit_mode and pygame.K_1 <= ev.key <= pygame.K_9:
                     guns = editor.available_guns()
                     idx = ev.key - pygame.K_1
@@ -206,7 +216,9 @@ def main() -> None:  # pragma: no cover - needs a display
                 mx, my = ev.pos
                 if mx < GW:  # click on the playfield -> place / equip / remove
                     if ev.button == 1:
-                        if editor.placing_gate:
+                        if editor.placing_limiter:
+                            editor.place_limiter(mx, my)
+                        elif editor.placing_gate:
                             editor.place_gate(mx, my)
                         else:
                             hit = editor.turret_at(mx, my)
@@ -216,8 +228,9 @@ def main() -> None:  # pragma: no cover - needs a display
                             else:
                                 editor.place(mx, my)
                         sync_world()
-                    elif ev.button == 3:  # remove a turret, or a gate if none there
-                        if editor.remove_at(mx, my) or editor.remove_gate_at(mx, my):
+                    elif ev.button == 3:  # remove a turret, gate, or limiter under the cursor
+                        if (editor.remove_at(mx, my) or editor.remove_gate_at(mx, my)
+                                or editor.remove_limiter_at(mx, my)):
                             sync_world()
                 elif ev.button == 1:  # click on the panel -> palette selection
                     for rect, kind, name in palette_hits:
@@ -226,6 +239,8 @@ def main() -> None:  # pragma: no cover - needs a display
                                 editor.select_gun(name)
                             elif kind == "gate":
                                 editor.select_gate()
+                            elif kind == "limiter":
+                                editor.select_limiter()
                             else:
                                 editor.toggle_module(name)
                             break
@@ -301,8 +316,24 @@ def main() -> None:  # pragma: no cover - needs a display
                 for ci, k in enumerate(routed):
                     pygame.draw.rect(screen, KINDS[k]["color"], (tx - 6 + ci * 6, ty - 2, 5, 5))
 
+        # limiters: a valve marker at the node, with its buffered count
+        for lm in world.limiters:
+            if lm.node not in world.map.nodes:
+                continue
+            lx, ly = (int(v) for v in world.map.pos(lm.node))
+            pygame.draw.rect(screen, BG, (lx - 9, ly - 9, 18, 18))
+            pygame.draw.rect(screen, AMBER, (lx - 9, ly - 9, 18, 18), 2)
+            pygame.draw.line(screen, AMBER, (lx, ly - 9), (lx, ly + 9), 2)
+            text(lm.id, lx - 8, ly - 30, F_S, AMBER)
+
         # placement preview: highlight what a click would bind to
-        if edit_mode and mouse[0] < GW and editor.placing_gate:
+        if edit_mode and mouse[0] < GW and editor.placing_limiter:
+            col = PHOS if world.bank.can_afford(editor.pending_cost()) else DANGER
+            nid = world.map.nearest_node(mouse[0], mouse[1])
+            fx, fy = (int(v) for v in world.map.pos(nid))
+            pygame.draw.line(screen, col, mouse, (fx, fy), 1)
+            pygame.draw.rect(screen, col, (fx - 10, fy - 10, 20, 20), 2)
+        elif edit_mode and mouse[0] < GW and editor.placing_gate:
             col = PHOS if world.bank.can_afford(editor.pending_cost()) else DANGER
             fork = world.map.nearest_branch_node(mouse[0], mouse[1])
             if fork is not None:
@@ -399,21 +430,26 @@ def main() -> None:  # pragma: no cover - needs a display
                      PANEL_X + 2, row, F_S, color)
                 row += 17
             row += 6
-            text("ROUTERS  (click or G)", PANEL_X, row, F_S, MUTED)
+            text("FLOW DEVICES  (click, G gate / B limiter)", PANEL_X, row, F_S, MUTED)
             row += 17
             gcolor = GATE_C if editor.placing_gate else (
                 INK if world.bank.can_afford(DEFAULT_GATE_COST) else MUTED)
             palette_hits.append((pygame.Rect(PANEL_X, row - 1, panel_w, 17), "gate", "gate"))
-            text(f"gate {DEFAULT_GATE_COST:>4}cr  (routes kinds at a fork)",
+            text(f"gate    {DEFAULT_GATE_COST:>4}cr  routes kinds at a fork",
                  PANEL_X + 2, row, F_S, gcolor)
+            row += 17
+            lcolor = GATE_C if editor.placing_limiter else (
+                INK if world.bank.can_afford(DEFAULT_LIMITER_COST) else MUTED)
+            palette_hits.append((pygame.Rect(PANEL_X, row - 1, panel_w, 17), "limiter", "limiter"))
+            text(f"limiter {DEFAULT_LIMITER_COST:>4}cr  buffers + smooths a burst",
+                 PANEL_X + 2, row, F_S, lcolor)
             row += 21
-            if editor.placing_gate:
-                color = PHOS if world.bank.can_afford(DEFAULT_GATE_COST) else DANGER
-                text(f"to place: gate  {DEFAULT_GATE_COST}cr", PANEL_X, row, F_S, color)
-            elif editor.selected_gun is not None:
+            placing = ("limiter" if editor.placing_limiter else
+                       "gate" if editor.placing_gate else editor.selected_gun)
+            if placing is not None:
                 sc = editor.pending_cost()
                 color = PHOS if world.bank.can_afford(sc) else DANGER
-                text(f"to place: {editor.selected_gun}  {sc}cr", PANEL_X, row, F_S, color)
+                text(f"to place: {placing}  {sc}cr", PANEL_X, row, F_S, color)
         else:
             # LLM helper area
             pygame.draw.rect(screen, PANEL, (PANEL_X, row, panel_w, 150), border_radius=6)
@@ -453,7 +489,8 @@ def main() -> None:  # pragma: no cover - needs a display
             text("HELP — H to close", 24, 20, F_M, PHOS)
             controls = [
                 ("[ ]", "previous / next map"), ("E", "placement editor"),
-                ("G", "gate router (in editor)"), ("M", "metrics dashboard"),
+                ("G", "gate router (in editor)"), ("B", "quelimiter (in editor)"),
+                ("M", "metrics dashboard"),
                 ("S", "save build to loadout.py"), ("D", "cycle difficulty"),
                 ("P", "pause"), ("R", "reset"), ("F5", "reload loadout.py"),
                 ("L", "local-LLM help"),

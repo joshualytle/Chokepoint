@@ -43,8 +43,13 @@ with the placement editor — press `E`. In the editor:
 - **Right-click** a turret (or gate) to remove it (full refund).
 - Pick the **gate** router (click it or press `G`) and left-click near a **fork**
   to place one. A gate auto-routes each kind to the branch whose consumers can
-  handle it — so you split traffic to the right turret setup. (The `delta` map
-  has a fork; cycle maps with `[` `]`.)
+  handle it — so you split traffic to the right turret setup. (The `delta` and
+  `trident` maps have forks; cycle maps with `[` `]`.)
+- Pick the **quelimiter** (click it or press `B`) and left-click a **node** to
+  place a buffer. It absorbs a burst and releases packets onward at a steady
+  rate, so a downstream turret isn't overwhelmed by the spike. Its buffer is
+  finite, though — it smooths *bursts*, not *sustained* overload. For steady
+  load you still need throughput (more turrets, or a damage module).
 
 Both paths run through the same budget: `loadout.py` is your *initial paid
 build*, and the editor spends from the same credits for changes.

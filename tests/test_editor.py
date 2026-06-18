@@ -158,30 +158,58 @@ def test_to_python_round_trips():
 
     ed.select_gate()
     ed.place_gate(180, 340)
+    ed.select_limiter()
+    ed.place_limiter(90, 200)
 
     src = ed.to_python()
     ns: dict = {}
     exec(src, ns)  # noqa: S102 - exercising the generated loadout source
     turrets = ns["build_loadout"](set(), [])
     gates = ns["build_gates"](set(), [])
+    limiters = ns["build_limiters"](set(), [])
 
     assert [t.gun.name for t in turrets] == ["sieve", "scatter"]
     assert (turrets[0].x, turrets[0].y) == (100, 120)
     assert any(m.name == "range+" for m in turrets[0].gun.modules)
     assert [(g.x, g.y) for g in gates] == [(180, 340)]
+    assert [(lm.x, lm.y) for lm in limiters] == [(90, 200)]
 
 
 def test_to_python_omits_unused_imports_for_a_bare_build():
-    # a build with no modules and no gates shouldn't import MODULE_LIBRARY or Gate
+    # a turret-only build shouldn't import MODULE_LIBRARY, Gate, or Limiter
     ed = full_editor()
     ed.select_gun("sieve")
     ed.place(100, 100)
     src = ed.to_python()
     assert "MODULE_LIBRARY" not in src
     assert "import Gate" not in src
+    assert "import Limiter" not in src
     ns: dict = {}
     exec(src, ns)  # noqa: S102 - exercising the generated loadout source
     assert ns["build_gates"](set(), []) == []
+    assert ns["build_limiters"](set(), []) == []
+
+
+def test_place_and_remove_limiter_with_bank():
+    ed, bank = banked_editor(1000)
+    ed.select_limiter()
+    assert ed.pending_cost() > 0
+    lim = ed.place_limiter(90, 200)
+    assert lim is not None
+    assert bank.balance == 1000 - lim.cost
+    assert ed.remove_limiter_at(92, 201) is True
+    assert bank.balance == 1000
+    assert ed.to_limiters() == []
+
+
+def test_selecting_gun_leaves_device_modes():
+    ed = full_editor()
+    ed.select_limiter()
+    assert ed.placing_limiter is True
+    ed.select_gate()
+    assert ed.placing_limiter is False and ed.placing_gate is True
+    ed.select_gun("sieve")
+    assert ed.placing_gate is False and ed.placing_limiter is False
 
 
 # ---- gates in the editor ---- #

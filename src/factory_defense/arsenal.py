@@ -168,6 +168,7 @@ class Turret:
     y: float
     gun: Gun
     id: str = ""              # assigned by the simulation
+    node: str = ""            # node whose queue it serves (assigned by the simulation)
     cd: float = 0.0           # fire cooldown
     synergy_mult: float = 1.0  # set each step from active synergies
 

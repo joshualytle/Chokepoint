@@ -85,9 +85,10 @@ def build_loadout(unlocked, slots):
     ]
 ```
 
-A turret's position lives on the object (`Turret(x, y, gun=...)`), so placement
-is just data you set. Different maps route packets differently, so you'll
-reposition turrets when you switch maps.
+A turret's position lives on the object (`Turret(x, y, gun=...)`). The map is a
+graph of **nodes** (junctions where packets queue) joined by edges; when a
+turret is placed it **binds to the nearest node** and drains that node's queue
+for the kinds it accepts. Place a consumer where its kind actually piles up.
 
 ## The arsenal (drop-in objects)
 
@@ -101,9 +102,19 @@ reposition turrets when you switch maps.
 - **Synergies** trigger when you place a specific pair of guns together (e.g.
   `sieve` + `auditor` = "Correlation", +25% throughput to both).
 
-The core puzzle is **coverage**: if no placed turret accepts a kind that shows
-up, every packet of that kind leaks. Watch the per-kind table and the
-`COVERAGE GAP` warning, then add a turret whose gun accepts the missing kind.
+The core puzzle is **coverage + latency**. Two ways to lose:
+
+- **Loss (leaks):** a kind no turret accepts flows untouched to the exit, and a
+  node whose queue overflows its capacity drops the excess. Too many drops ends
+  the run (watch `leaks` and the `COVERAGE GAP` warning).
+- **Latency (health):** packets that sit queued past a short grace period bleed
+  your `health` — the SLA/backpressure failure. A node whose turrets can't keep
+  up with its inflow backs up and drains health even though its kind *is*
+  covered. The fix isn't always "another turret" — it's enough throughput, the
+  right gun, or a module, at the node that's backing up.
+
+Watch the per-kind table, the node queue counts, and the health bar, then fix
+the bottleneck.
 
 ## Optional: local LLM help
 

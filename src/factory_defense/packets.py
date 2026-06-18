@@ -25,14 +25,23 @@ KIND_LIST: list[str] = list(KINDS)
 
 @dataclass
 class Packet:
-    """One unit of alert traffic. ``volume`` is how much processing it needs;
-    turrets chip it down with each shot. Reaches the exit unhandled -> a leak."""
+    """One unit of alert traffic flowing through the topology.
+
+    ``volume`` is how much processing it needs; a serving turret chips it down
+    each shot until handled. A packet is either *in transit* on an edge
+    (``moving_to`` set, ``seg_pos`` = distance along it) or *queued* at node
+    ``at`` (``moving_to`` is None), where ``wait`` accrues its dwell time. Reach
+    the sink unhandled, sit queued too long, or overflow a queue -> trouble.
+    """
 
     kind: str
     volume: float
     maxvol: float
     speed: float
-    d: float = 0.0
+    at: str                     # node id the packet is queued at / departing from
+    moving_to: str | None = None  # node id it's traveling toward; None = queued
+    seg_pos: float = 0.0        # distance covered along the current edge
+    wait: float = 0.0           # seconds spent queued at the current node (dwell)
     dead: bool = False
     handled: bool = False
 

@@ -29,7 +29,9 @@ from .arsenal import MODULE_LIBRARY, gun_cost, make_gun
 from .editor import ArsenalEditor
 from .maps import GW, MAP_LIST, MAPS
 from .packets import DIFFICULTY_LIST, KINDS
-from .simulation import MAX_LEAK, World
+from .simulation import MAX_LEAK, QUEUE_CAP, START_HEALTH, World
+
+QUEUE_WARN = QUEUE_CAP - 2  # queue depth at which a node's marker turns red
 
 
 def main() -> None:  # pragma: no cover - needs a display
@@ -64,7 +66,6 @@ def main() -> None:  # pragma: no cover - needs a display
     # palette rows registered each frame so panel clicks can be mapped to actions:
     # (rect, "gun"|"mod", name)
     palette_hits: list[tuple[Any, str, str]] = []
-    fire_beams: list[tuple[float, float, float, float, float]] = []  # x1,y1,x2,y2,ttl
     llm_state: dict[str, str] = {"status": "idle", "text": "Press L for local-LLM help."}
 
     def deploy_loadout(refund_current: bool = False) -> None:
@@ -202,43 +203,54 @@ def main() -> None:  # pragma: no cover - needs a display
             pygame.draw.line(screen, GRID, (x, 0), (x, WIN_H))
         for y in range(0, WIN_H, 40):
             pygame.draw.line(screen, GRID, (0, y), (GW, y))
-        pygame.draw.lines(screen, (42, 66, 89), False, world.map.path, 16)
-        ex = world.map.path[-1]
-        pygame.draw.rect(screen, DANGER, (ex[0] - 14, ex[1] - 20, 7, 40))
+        # ---- topology: edges, then nodes with their queues ----
+        for src, dst in world.map.edges():
+            pygame.draw.line(screen, (42, 66, 89), world.map.pos(src), world.map.pos(dst), 12)
+        for nid, node in world.map.nodes.items():
+            q = world.queue_at(nid)
+            nx, ny = int(node.x), int(node.y)
+            if nid == world.map.sink:
+                pygame.draw.rect(screen, DANGER, (nx - 8, ny - 20, 7, 40))
+            depth_c = DANGER if len(q) > QUEUE_WARN else MUTED
+            pygame.draw.circle(screen, depth_c, (nx, ny), 5)
+            if q:
+                text(str(len(q)), nx + 7, ny - 7, F_S, depth_c)
+            # queued packets stacked beside the node (size shrinks as volume drains)
+            for j, p in enumerate(q):
+                r = max(3, int(6 * p.volume / p.maxvol))
+                pygame.draw.circle(screen, KINDS[p.kind]["color"],
+                                   (nx + 12 + (j % 4) * 8, ny - 12 + (j // 4) * 8), r)
 
         hovered_turret = None
         for t in world.turrets:
-            surf = pygame.Surface((t.range() * 2, t.range() * 2), pygame.SRCALPHA)
-            pygame.draw.circle(surf, (56, 225, 176, 12), (t.range(), t.range()), t.range())
-            pygame.draw.circle(surf, (56, 225, 176, 45), (t.range(), t.range()), t.range(), 1)
-            screen.blit(surf, (t.x - t.range(), t.y - t.range()))
+            if t.node in world.map.nodes:  # tether the turret to the queue it serves
+                pygame.draw.line(screen, GRID, (int(t.x), int(t.y)), world.map.pos(t.node), 1)
             pygame.draw.circle(screen, BG, (int(t.x), int(t.y)), 12)
             pygame.draw.circle(screen, PHOS, (int(t.x), int(t.y)), 12, 2)
             text(t.id, int(t.x) - 8, int(t.y) - 30, F_S, PHOS)
-            # accepted-kind swatches under the turret
             for i, k in enumerate(sorted(t.accepts())):
                 pygame.draw.rect(screen, KINDS[k]["color"], (t.x - 14 + i * 6, t.y + 14, 5, 5))
             if (mouse[0] - t.x) ** 2 + (mouse[1] - t.y) ** 2 <= 16 * 16:
                 hovered_turret = t
 
-        # placement preview: ghost the selected gun's range under the cursor
+        # placement preview: highlight the node a click would bind the turret to
         if edit_mode and mouse[0] < GW and editor.selected_gun is not None:
-            preview = make_gun(editor.selected_gun)
-            rng = preview.effective_range()
             col = PHOS if world.bank.can_afford(editor.pending_cost()) else DANGER
-            ring = pygame.Surface((rng * 2, rng * 2), pygame.SRCALPHA)
-            pygame.draw.circle(ring, (*col, 30), (int(rng), int(rng)), int(rng), 1)
-            screen.blit(ring, (mouse[0] - rng, mouse[1] - rng))
-            pygame.draw.circle(screen, col, mouse, 12, 2)
+            nid = world.map.nearest_node(mouse[0], mouse[1])
+            pygame.draw.line(screen, col, mouse, world.map.pos(nid), 1)
+            pygame.draw.circle(screen, col, world.map.pos(nid), 15, 2)
+            pygame.draw.circle(screen, col, mouse, 10, 2)
 
+        # in-transit packets, interpolated along their edge
         for p in world.packets:
-            px, py = world.map.pos_at(p.d)
+            if p.moving_to is None:
+                continue
+            ax, ay = world.map.pos(p.at)
+            bx, by = world.map.pos(p.moving_to)
+            f = min(1.0, p.seg_pos / (world.map.edge_len(p.at, p.moving_to) or 1.0))
             r = max(3, int(7 * p.volume / p.maxvol))
-            pygame.draw.circle(screen, KINDS[p.kind]["color"], (int(px), int(py)), r)
-
-        for beam in fire_beams:
-            pygame.draw.line(screen, (234, 247, 241), (beam[0], beam[1]), (beam[2], beam[3]), 1)
-        fire_beams = [(*b[:4], b[4] - dt) for b in fire_beams if b[4] - dt > 0]
+            pygame.draw.circle(screen, KINDS[p.kind]["color"],
+                               (int(ax + (bx - ax) * f), int(ay + (by - ay) * f)), r)
 
         if world.intermission > 0 and not world.over:
             text(f"Wave {world.level} incoming...", GW // 2 - 70, 14, F_M, INK)
@@ -252,15 +264,22 @@ def main() -> None:  # pragma: no cover - needs a display
         text(f"leaks {world.leaks}/{MAX_LEAK}", PANEL_X + 110, 40, F_S, leak_c)
         text(f"cr {world.bank.balance}", PANEL_X + 240, 40, F_S, PHOS)
 
+        # health: the latency budget, bled by packets that sit queued too long
+        hp_frac = max(0.0, world.health / START_HEALTH)
+        hp_c = DANGER if hp_frac < 0.34 else (INK if hp_frac < 0.67 else PHOS)
+        text(f"health {world.health:.0f}", PANEL_X, 60, F_S, hp_c)
+        pygame.draw.rect(screen, GRID, (PANEL_X + 90, 62, 120, 8))
+        pygame.draw.rect(screen, hp_c, (PANEL_X + 90, 62, int(120 * hp_frac), 8))
+
         gaps = sorted(world.coverage_gaps())
         if gaps:
-            text("COVERAGE GAP: " + ", ".join(gaps), PANEL_X, 60, F_S, DANGER)
+            text("COVERAGE GAP: " + ", ".join(gaps), PANEL_X, 78, F_S, DANGER)
         else:
-            text("coverage: all seen kinds handled", PANEL_X, 60, F_S, PHOS)
+            text("coverage: all seen kinds handled", PANEL_X, 78, F_S, PHOS)
 
         # per-kind table
-        text("KIND        in  ok  leak  now", PANEL_X, 86, F_S, MUTED)
-        row = 104
+        text("KIND        in  ok  leak  now", PANEL_X, 100, F_S, MUTED)
+        row = 118
         for k, s in world.stats.items():
             if s.spawned == 0:
                 continue
@@ -320,7 +339,8 @@ def main() -> None:  # pragma: no cover - needs a display
                 f"{hovered_turret.id}: {g.name}",
                 g.desc,
                 f"accepts: {', '.join(sorted(hovered_turret.accepts()))}",
-                f"fire rate {g.fire_rate}/s (static)   range {hovered_turret.range():.0f}",
+                f"fire rate {g.fire_rate}/s (static)   "
+                f"node {hovered_turret.node} (q{len(world.queue_at(hovered_turret.node))})",
                 f"dps {hovered_turret.dps():.1f}"
                 + (f"   x{hovered_turret.synergy_mult:.2f} synergy"
                    if hovered_turret.synergy_mult > 1 else ""),

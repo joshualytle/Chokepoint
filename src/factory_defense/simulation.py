@@ -1,11 +1,19 @@
-"""The simulation: packets flood a map, turrets process the kinds they accept.
+"""The simulation: alerts flow a topology, queue at nodes, get serviced there.
 
 Pure logic, no pygame — fully testable headless. Rendering reads this state.
 
-Key teaching metric: per-kind ``leaked`` and the ``coverage_gaps`` set. If no
-placed turret accepts a kind, every packet of that kind leaks — the alert-
-pipeline lesson that typed consumers must collectively cover the event mix, with
-enough throughput per type to survive bursts.
+The model is a flow network. Packets enter at the source and travel edge to
+edge toward the sink. At each node they join a **queue**; a turret attached to
+that node drains the queue for the kinds its gun accepts. Two things can go
+wrong, and both are real alert-pipeline failure modes:
+
+  * **Loss** — a packet reaches the sink unhandled, or a node's queue overflows
+    its capacity. Counts toward ``leaks`` (the drop/MAX_LEAK failure).
+  * **Latency** — a packet sits queued past a grace period and starts bleeding
+    ``health`` (the SLA/backpressure failure: age-of-oldest-message made real).
+
+So coverage alone isn't enough: a node whose turrets can't keep up with its
+inflow backs up, bleeds health, and eventually overflows — per-type backpressure.
 """
 
 from __future__ import annotations
@@ -14,12 +22,18 @@ from dataclasses import dataclass
 
 from .arsenal import Turret, compute_synergy_mult, unlocked_at
 from .economy import Bank
-from .maps import GameMap
+from .maps import Graph
 from .packets import DIFFICULTIES, KIND_LIST, WAVES, Packet
 
 PACKET_VOLUME = 12.0
 PACKET_SPEED = 60.0
-MAX_LEAK = 12
+
+# Failure model.
+MAX_LEAK = 12              # dropped/overflowed packets that end the run
+START_HEALTH = 100.0       # latency budget; bleeds while packets dwell too long
+QUEUE_CAP = 8              # packets a node holds before it overflows (a drop)
+DWELL_GRACE = 3.0          # seconds a packet may queue before it bleeds health
+DWELL_DRAIN = 3.0          # health/sec drained per packet queued past the grace
 
 # Economy: starting budget, and income granted each time a wave is cleared.
 # Income scales with the wave number so spending power grows as threats escalate.
@@ -37,11 +51,11 @@ class KindStat:
 
 
 class World:
-    """Runs one game on a given map with a given set of placed turrets."""
+    """Runs one game on a given topology with a given set of placed turrets."""
 
     def __init__(
         self,
-        game_map: GameMap,
+        game_map: Graph,
         starting_credits: int = STARTING_CREDITS,
         difficulty: str = "easy",
     ):
@@ -56,15 +70,18 @@ class World:
 
     # ---- setup ---- #
     def set_turrets(self, turrets: list[Turret]) -> None:
+        """Place turrets and bind each to the node whose queue it serves."""
         self.turrets = turrets
         for i, t in enumerate(turrets):
             t.id = f"T{i + 1}"
             t.cd = 0.0
+            t.node = self.map.nearest_node(t.x, t.y)
 
     def reset(self) -> None:
         self.packets: list[Packet] = []
         self.wave_idx = 0
         self.leaks = 0
+        self.health = START_HEALTH
         self.spawn_q: list[tuple[float, str]] = []
         self.spawn_clock = 0.0
         self.intermission = 0.0
@@ -96,6 +113,15 @@ class World:
         seen = {k for k, s in self.stats.items() if s.spawned > 0}
         return seen - set(self.coverage())
 
+    def queue_at(self, node_id: str) -> list[Packet]:
+        """Packets currently queued (not in transit, not dead) at a node, FIFO."""
+        return [p for p in self.packets
+                if p.moving_to is None and p.at == node_id and not p.dead]
+
+    def serves(self, node_id: str, kind: str) -> bool:
+        """Does any turret at this node accept this kind?"""
+        return any(t.node == node_id and kind in t.accepts() for t in self.turrets)
+
     def load_wave(self, i: int) -> None:
         # The active difficulty strategy decides the next wave's groups, reading
         # how much of each kind has leaked so far (used by the adaptive profile).
@@ -115,8 +141,11 @@ class World:
         if self.over or self.paused:
             return
         self._spawn(dt)
-        self._move(dt)
+        self._transit(dt)
         self._process(dt)
+        self._route_and_dwell(dt)
+        self._overflow()
+        self._drain_health(dt)
         self.packets = [p for p in self.packets if not p.dead]
         for k in KIND_LIST:
             self.stats[k].inflight = sum(1 for p in self.packets if p.kind == k)
@@ -130,45 +159,81 @@ class World:
         while self.spawn_q and self.spawn_clock >= self.spawn_q[0][0]:
             _, kind = self.spawn_q.pop(0)
             self.packets.append(
-                Packet(kind, PACKET_VOLUME, PACKET_VOLUME, PACKET_SPEED)
+                Packet(kind, PACKET_VOLUME, PACKET_VOLUME, PACKET_SPEED, at=self.map.source)
             )
             self.stats[kind].spawned += 1
             self.started = True
 
-    def _move(self, dt: float) -> None:
+    def _transit(self, dt: float) -> None:
+        """Advance in-transit packets; on arrival they join the next node's queue."""
         for p in self.packets:
-            p.d += p.speed * dt
-            if p.d >= self.map.length:
-                p.dead = True
-                if not p.handled:
-                    self.leaks += 1
-                    self.stats[p.kind].leaked += 1
-                    if self.leaks >= MAX_LEAK:
-                        self.over, self.won = True, False
+            if p.dead or p.moving_to is None:
+                continue
+            p.seg_pos += p.speed * dt
+            if p.seg_pos >= self.map.edge_len(p.at, p.moving_to):
+                p.at, p.moving_to, p.seg_pos, p.wait = p.moving_to, None, 0.0, 0.0
 
     def _process(self, dt: float) -> None:
+        """Each turret drains the queue at its node for the kinds it accepts."""
         mult = compute_synergy_mult(self.turrets)
         for t in self.turrets:
             t.synergy_mult = mult.get(t.id, 1.0)
             t.cd -= dt
+            if t.cd > 0:
+                continue
             accepts = t.accepts()
-            rng = t.range()
-            # candidates: accepted, alive, in range — target the furthest along
-            target = None
-            best_d = -1.0
-            for p in self.packets:
-                if p.dead or p.handled or p.kind not in accepts:
-                    continue
-                px, py = self.map.pos_at(p.d)
-                if (px - t.x) ** 2 + (py - t.y) ** 2 <= rng * rng and p.d > best_d:
-                    target, best_d = p, p.d
-            if target is not None and t.cd <= 0:
+            target = next(
+                (p for p in self.queue_at(t.node) if p.kind in accepts and not p.handled),
+                None,
+            )
+            if target is not None:
                 t.cd = 1.0 / t.gun.fire_rate
                 target.volume -= t.gun.effective_damage() * t.synergy_mult
                 if target.volume <= 0:
                     target.handled = True
                     target.dead = True
                     self.stats[target.kind].handled += 1
+
+    def _route_and_dwell(self, dt: float) -> None:
+        """Queued packets either wait for local service (accruing dwell) or, if no
+        turret here accepts them, get routed onward — leaking if that's the sink."""
+        for p in self.packets:
+            if p.dead or p.moving_to is not None:
+                continue
+            if self.serves(p.at, p.kind):
+                p.wait += dt                      # waiting for service -> latency
+                continue
+            nxt = self.map.next_of(p.at)
+            if nxt is None:                       # unserved at the sink -> a drop
+                self._leak(p)
+            else:
+                p.moving_to, p.seg_pos = nxt, 0.0
+
+    def _overflow(self) -> None:
+        """A node holding more than QUEUE_CAP packets drops the excess (oldest)."""
+        for node_id in self.map.nodes:
+            q = self.queue_at(node_id)
+            for p in q[:-QUEUE_CAP] if len(q) > QUEUE_CAP else []:
+                self._leak(p)
+
+    def _drain_health(self, dt: float) -> None:
+        """Packets queued past the grace period bleed the latency budget."""
+        aging = sum(1 for p in self.packets
+                    if p.moving_to is None and not p.dead and p.wait > DWELL_GRACE)
+        if aging:
+            self.health -= DWELL_DRAIN * aging * dt
+            if self.health <= 0:
+                self.health = 0.0
+                self.over, self.won = True, False
+
+    def _leak(self, p: Packet) -> None:
+        if p.dead:
+            return
+        p.dead = True
+        self.leaks += 1
+        self.stats[p.kind].leaked += 1
+        if self.leaks >= MAX_LEAK:
+            self.over, self.won = True, False
 
     def wave_income(self, level: int) -> int:
         """Credits granted for clearing the wave at ``level`` (scales upward)."""

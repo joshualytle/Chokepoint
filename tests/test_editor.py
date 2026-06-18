@@ -156,14 +156,48 @@ def test_to_python_round_trips():
     ed.select_gun("scatter")
     ed.place(300, 300)
 
+    ed.select_gate()
+    ed.place_gate(180, 340)
+
     src = ed.to_python()
     ns: dict = {}
     exec(src, ns)  # noqa: S102 - exercising the generated loadout source
     turrets = ns["build_loadout"](set(), [])
+    gates = ns["build_gates"](set(), [])
 
     assert [t.gun.name for t in turrets] == ["sieve", "scatter"]
     assert (turrets[0].x, turrets[0].y) == (100, 120)
     assert any(m.name == "range+" for m in turrets[0].gun.modules)
+    assert [(g.x, g.y) for g in gates] == [(180, 340)]
+
+
+# ---- gates in the editor ---- #
+def test_place_and_remove_gate_with_bank():
+    ed, bank = banked_editor(1000)
+    ed.select_gate()
+    assert ed.pending_cost() > 0          # gate mode shows the gate price
+    g = ed.place_gate(180, 340)
+    assert g is not None
+    assert bank.balance == 1000 - g.cost
+    assert ed.remove_gate_at(182, 341) is True
+    assert bank.balance == 1000           # full refund
+    assert ed.to_gates() == []
+
+
+def test_place_gate_rejected_when_unaffordable():
+    ed, bank = banked_editor(10)
+    ed.select_gate()
+    assert ed.place_gate(180, 340) is None
+    assert bank.balance == 10
+    assert ed.to_gates() == []
+
+
+def test_selecting_gun_leaves_gate_mode():
+    ed = full_editor()
+    ed.select_gate()
+    assert ed.placing_gate is True
+    ed.select_gun("sieve")
+    assert ed.placing_gate is False
 
 
 # ---- economy: editor spends from a bank when one is attached ---- #

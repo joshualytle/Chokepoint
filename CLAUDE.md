@@ -34,6 +34,9 @@ arsenal.py     Gun (static fire_rate, accepts set, cost), Module (attach to upgr
                register_module), gun_cost(), SYNERGIES, unlocked_at(wave). Drop-in.
 economy.py     Bank — credit balance with can_afford/spend/earn. Pure. Shared by
                reference between World (income) and ArsenalEditor (spending).
+gates.py       Gate — a typed router placed at a fork; routes kinds to branch
+               indices (the Lambda/EventBridge pre-filter). World.autoroute()
+               derives routes from the turret layout (content-based routing).
 metrics.py     Telemetry — pure observability backend. World feeds it events +
                per-wave samples; aggregates KindFlow/NodeLoad/Latency(Histogram)/
                Trend/Efficiency. summarize_failure() -> incident post-mortem.

@@ -40,7 +40,11 @@ with the placement editor — press `E`. In the editor:
 - Click a gun in the palette (or press `1`–`9`) to select it, click module rows
   to queue upgrades onto it, then **left-click the map** to place.
 - **Left-click an existing turret** to equip your queued modules onto it.
-- **Right-click** a turret to remove it (full refund).
+- **Right-click** a turret (or gate) to remove it (full refund).
+- Pick the **gate** router (click it or press `G`) and left-click near a **fork**
+  to place one. A gate auto-routes each kind to the branch whose consumers can
+  handle it — so you split traffic to the right turret setup. (The `delta` map
+  has a fork; cycle maps with `[` `]`.)
 
 Both paths run through the same budget: `loadout.py` is your *initial paid
 build*, and the editor spends from the same credits for changes.

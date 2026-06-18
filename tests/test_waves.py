@@ -3,12 +3,21 @@
 from chokepoint.maps import MAPS
 from chokepoint.packets import (
     DIFFICULTIES,
+    INTRO_ORDER,
+    SUBWAVES,
     WAVES,
     adaptive_wave,
     easy_wave,
     overkill_wave,
 )
 from chokepoint.simulation import World
+
+
+def first_wave_with(kind) -> int:
+    for i, wave in enumerate(WAVES):
+        if any(k == kind for k, *_ in wave):
+            return i
+    return -1
 
 
 def total_count(wave) -> int:
@@ -27,6 +36,30 @@ def test_registry_has_the_three_modes():
 
 def test_email_kind_appears_in_the_curated_waves():
     assert any(kind == "email" for wave in WAVES for kind, *_ in wave)
+
+
+# ---- curriculum: introduce in order, escalate, then burst ---- #
+def test_curriculum_introduces_kinds_in_intro_order():
+    firsts = [first_wave_with(k) for k in INTRO_ORDER]
+    assert all(f >= 0 for f in firsts)
+    assert firsts == sorted(firsts)              # each new kind enters later
+    assert firsts[0] == 0                        # the first kind opens the game
+
+
+def test_stage_escalates_slow_fast_faster_then_bursts():
+    # stage 0 is the auth kind across waves 0,1,2
+    slow_gap = min(g for _, _, g, _ in WAVES[0])
+    fast_gap = min(g for _, _, g, _ in WAVES[1])
+    burst_gap = min(g for _, _, g, _ in WAVES[2 % SUBWAVES])
+    assert slow_gap > fast_gap > burst_gap        # rate keeps rising
+    assert burst_gap <= 0.15                      # the faster sub-wave has a spike
+
+
+def test_later_waves_carry_background_kinds():
+    # a stage-1 wave (index SUBWAVES) should still include the stage-0 kind
+    later = WAVES[SUBWAVES]
+    kinds = {k for k, *_ in later}
+    assert INTRO_ORDER[0] in kinds and INTRO_ORDER[1] in kinds
 
 
 # ---- easy = today's behavior ---- #

@@ -171,6 +171,19 @@ def test_to_python_round_trips():
     assert [(g.x, g.y) for g in gates] == [(180, 340)]
 
 
+def test_to_python_omits_unused_imports_for_a_bare_build():
+    # a build with no modules and no gates shouldn't import MODULE_LIBRARY or Gate
+    ed = full_editor()
+    ed.select_gun("sieve")
+    ed.place(100, 100)
+    src = ed.to_python()
+    assert "MODULE_LIBRARY" not in src
+    assert "import Gate" not in src
+    ns: dict = {}
+    exec(src, ns)  # noqa: S102 - exercising the generated loadout source
+    assert ns["build_gates"](set(), []) == []
+
+
 # ---- gates in the editor ---- #
 def test_place_and_remove_gate_with_bank():
     ed, bank = banked_editor(1000)

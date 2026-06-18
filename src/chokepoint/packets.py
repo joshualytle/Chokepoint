@@ -47,19 +47,39 @@ class Packet:
     handled: bool = False
 
 
-# Wave streams: (kind, count, gap_seconds, delay_seconds).
-# Tight gaps + high counts = a burst/flood. Kinds are introduced gradually so
-# you can adapt your loadout; the tool to handle each kind unlocks in time
-# (see arsenal.UNLOCKS).
+# Wave streams: (kind, count, gap_seconds, delay_seconds). Tight gaps + high
+# counts = a burst/flood.
+#
+# The waves are a curriculum, generated below. Kinds are introduced one at a
+# time in INTRO_ORDER, and each gets three escalating sub-waves — slow, fast,
+# then faster-with-a-burst — so you learn to handle a rising rate and a spike
+# before the next type arrives. Previously-introduced kinds keep trickling in as
+# background pressure, so coverage has to be maintained, not abandoned. A kind is
+# only introduced once its handling gun has unlocked.
+
+# kind -> the order it enters the curriculum (its handler unlocks earlier)
+INTRO_ORDER: list[str] = ["auth", "ids", "dns", "firewall", "email",
+                          "cloudtrail", "endpoint"]
+SUBWAVES = 3  # per kind: slow, fast, faster+burst
+
+
+def _stage_wave(i: int) -> list[tuple[str, int, float, float]]:
+    """The i-th curriculum wave: one focus kind escalating, prior kinds behind it."""
+    stage, sub = divmod(i, SUBWAVES)
+    focus = INTRO_ORDER[stage]
+    if sub == 0:                                   # slow: gentle steady stream
+        groups = [(focus, 10, 0.70, 0.0)]
+    elif sub == 1:                                 # fast: higher rate
+        groups = [(focus, 12, 0.45, 0.0)]
+    else:                                          # faster + a burst spike
+        groups = [(focus, 12, 0.32, 0.0), (focus, 10, 0.12, 3.5)]
+    for prior in INTRO_ORDER[:stage]:              # background pressure
+        groups.append((prior, 6, 0.80, 1.5))
+    return groups
+
+
 WAVES: list[list[tuple[str, int, float, float]]] = [
-    [("auth", 10, 0.6, 0.0)],
-    [("auth", 8, 0.6, 0.0), ("ids", 8, 0.6, 1.0)],
-    [("ids", 10, 0.5, 0.0), ("dns", 8, 0.7, 1.5)],
-    [("firewall", 12, 0.4, 0.0), ("ids", 20, 0.18, 2.0)],            # ids burst
-    [("cloudtrail", 10, 0.6, 0.0), ("auth", 10, 0.5, 1.0), ("dns", 8, 0.6, 2.0),
-     ("email", 8, 0.6, 2.5)],                                        # email arrives
-    [("endpoint", 6, 1.2, 0.0), ("ids", 14, 0.3, 1.0), ("email", 10, 0.4, 1.5),
-     ("cloudtrail", 10, 0.5, 2.0), ("firewall", 16, 0.25, 3.0)],     # mixed flood
+    _stage_wave(i) for i in range(len(INTRO_ORDER) * SUBWAVES)
 ]
 
 

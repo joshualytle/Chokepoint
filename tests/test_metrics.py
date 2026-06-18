@@ -81,14 +81,14 @@ def test_debrief_names_the_coverage_gap_kind_on_a_drop_loss():
     gm = MAPS["switchback"]
     w = World(gm)
     w.set_turrets([Turret(200, 140, make_gun("sieve"))])  # covers auth/dns only
-    w.wave_idx = 3
-    w.load_wave(3)  # firewall + ids burst, both uncovered here
+    w.spawn_q = [(0.0, "ids") for _ in range(20)]  # uncovered flood -> all leak
+    w.spawn_clock = 0.0
     w.started = True
     step_for(w, 60)
     assert w.over and not w.won
     deb = summarize_failure(w)
     assert "Dropped" in deb.cause
-    assert any("firewall" in ln and "coverage gap" in ln for ln in deb.lines)
+    assert any("ids" in ln and "coverage gap" in ln for ln in deb.lines)
 
 
 def test_debrief_reports_latency_collapse():

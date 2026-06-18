@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from .arsenal import Turret, compute_synergy_mult, unlocked_at
 from .economy import Bank
 from .maps import Graph
+from .metrics import Telemetry
 from .packets import DIFFICULTIES, KIND_LIST, WAVES, Packet
 
 PACKET_VOLUME = 12.0
@@ -93,6 +94,7 @@ class World:
         for t in self.turrets:
             t.cd = 0.0
         self.bank.balance = self.starting_credits  # refill in place; keep the reference
+        self.telemetry = Telemetry()  # fresh per run; render reads it for charts/debrief
         self.load_wave(0)
 
     @property
@@ -149,6 +151,7 @@ class World:
         self.packets = [p for p in self.packets if not p.dead]
         for k in KIND_LIST:
             self.stats[k].inflight = sum(1 for p in self.packets if p.kind == k)
+        self.telemetry.observe(self, dt)
         self._wave_check()
 
     def _spawn(self, dt: float) -> None:
@@ -162,6 +165,7 @@ class World:
                 Packet(kind, PACKET_VOLUME, PACKET_VOLUME, PACKET_SPEED, at=self.map.source)
             )
             self.stats[kind].spawned += 1
+            self.telemetry.on_spawn(kind, self.wave_idx)
             self.started = True
 
     def _transit(self, dt: float) -> None:
@@ -193,6 +197,7 @@ class World:
                     target.handled = True
                     target.dead = True
                     self.stats[target.kind].handled += 1
+                    self.telemetry.on_handle(target.kind, t.node, self.wave_idx, target.wait)
 
     def _route_and_dwell(self, dt: float) -> None:
         """Queued packets either wait for local service (accruing dwell) or, if no
@@ -205,7 +210,7 @@ class World:
                 continue
             nxt = self.map.next_of(p.at)
             if nxt is None:                       # unserved at the sink -> a drop
-                self._leak(p)
+                self._leak(p, "sink")
             else:
                 p.moving_to, p.seg_pos = nxt, 0.0
 
@@ -214,7 +219,7 @@ class World:
         for node_id in self.map.nodes:
             q = self.queue_at(node_id)
             for p in q[:-QUEUE_CAP] if len(q) > QUEUE_CAP else []:
-                self._leak(p)
+                self._leak(p, "overflow")
 
     def _drain_health(self, dt: float) -> None:
         """Packets queued past the grace period bleed the latency budget."""
@@ -226,12 +231,13 @@ class World:
                 self.health = 0.0
                 self.over, self.won = True, False
 
-    def _leak(self, p: Packet) -> None:
+    def _leak(self, p: Packet, cause: str) -> None:
         if p.dead:
             return
         p.dead = True
         self.leaks += 1
         self.stats[p.kind].leaked += 1
+        self.telemetry.on_leak(p.kind, p.at, self.wave_idx, cause, p.wait)
         if self.leaks >= MAX_LEAK:
             self.over, self.won = True, False
 

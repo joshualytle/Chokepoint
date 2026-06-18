@@ -7,6 +7,7 @@ Controls:
   [ / ]   previous / next map        R   reset
   P       pause / resume             F5  reload your loadout.py
   E       toggle the placement editor (buy/place/equip/remove turrets)
+  M       toggle the metrics dashboard (queues, by-kind, health trend)
   D       cycle difficulty (easy / adaptive / overkill) — resets the run
   L       ask your local LLM for help (optional; off-thread, never freezes)
   hover   a turret or a legend swatch for a tooltip
@@ -28,6 +29,7 @@ from . import loadout as loadout_mod
 from .arsenal import MODULE_LIBRARY, gun_cost, make_gun
 from .editor import ArsenalEditor
 from .maps import GW, MAP_LIST, MAPS
+from .metrics import summarize_failure
 from .packets import DIFFICULTY_LIST, KINDS
 from .simulation import MAX_LEAK, QUEUE_CAP, START_HEALTH, World
 
@@ -63,6 +65,7 @@ def main() -> None:  # pragma: no cover - needs a display
     world = World(MAPS[MAP_LIST[map_i]], difficulty=DIFFICULTY_LIST[difficulty_i])
     editor = ArsenalEditor(world.unlocked(), bank=world.bank)
     edit_mode = False
+    metrics_mode = False
     # palette rows registered each frame so panel clicks can be mapped to actions:
     # (rect, "gun"|"mod", name)
     palette_hits: list[tuple[Any, str, str]] = []
@@ -153,6 +156,8 @@ def main() -> None:  # pragma: no cover - needs a display
                     llm_state["text"] = "Loadout reloaded."
                 elif ev.key == pygame.K_e:
                     edit_mode = not edit_mode
+                elif ev.key == pygame.K_m:
+                    metrics_mode = not metrics_mode
                 elif ev.key == pygame.K_d:
                     difficulty_i = (difficulty_i + 1) % len(DIFFICULTY_LIST)
                     world.difficulty = DIFFICULTY_LIST[difficulty_i]
@@ -356,14 +361,69 @@ def main() -> None:  # pragma: no cover - needs a display
             for i, ln in enumerate(lines):
                 text(ln, bx + 8, by + 6 + i * 16, F_S, INK if i else PHOS)
 
+        # ---- metrics dashboard (toggle M): visualize the collected telemetry ----
+        if metrics_mode and not world.over:
+            ov = pygame.Surface((GW, WIN_H), pygame.SRCALPHA)
+            ov.fill((8, 14, 22, 228))
+            screen.blit(ov, (0, 0))
+            tel = world.telemetry
+            text("METRICS  (M to close)", 24, 20, F_M, PHOS)
+
+            text("NODE QUEUES (peak depth)", 24, 56, F_S, MUTED)
+            nodes = tel.node_summary()
+            max_q = max((nw.peak_queue for nw in nodes.values()), default=1) or 1
+            yy = 76
+            for nid in world.map.nodes:
+                nw = nodes.get(nid)
+                pk = nw.peak_queue if nw else 0
+                drops = nw.overflow_drops if nw else 0
+                col = DANGER if drops else PHOS
+                pygame.draw.rect(screen, col, (120, yy, max(1, int(220 * pk / max_q)), 10))
+                text(nid, 24, yy - 2, F_S, INK)
+                text(f"{pk}" + (f"  drop {drops}" if drops else ""), 350, yy - 2, F_S, col)
+                yy += 16
+
+            text("BY KIND  (handled / leaked)", 24, yy + 14, F_S, MUTED)
+            yy += 34
+            kinds = tel.kind_summary()
+            max_s = max((kw.spawned for kw in kinds.values()), default=1) or 1
+            for k, kw in kinds.items():
+                if kw.spawned == 0:
+                    continue
+                pygame.draw.rect(screen, KINDS[k]["color"],
+                                 (120, yy, max(1, int(200 * kw.handled / max_s)), 6))
+                pygame.draw.rect(screen, DANGER,
+                                 (120, yy + 7, max(0, int(200 * kw.leaked / max_s)), 6))
+                text(k, 24, yy - 1, F_S, INK)
+                text(f"{kw.handled}/{kw.leaked}", 330, yy - 1, F_S, INK)
+                yy += 20
+
+            text("HEALTH TREND", 24, yy + 14, F_S, MUTED)
+            yy += 32
+            pts = [tp.health for tp in tel.trend][-120:]
+            for i in range(1, len(pts)):
+                span = len(pts) - 1
+                a = (120 + (i - 1) * 240 / span, yy + 40 - pts[i - 1] / START_HEALTH * 40)
+                b = (120 + i * 240 / span, yy + 40 - pts[i] / START_HEALTH * 40)
+                pygame.draw.line(screen, PHOS, a, b, 1)
+            eff = tel.efficiency(world)
+            text(f"cost / handled: {eff['cost_per_handled']:.0f}cr", 24, yy + 52, F_S, INK)
+
         if world.over:
             ov = pygame.Surface((GW, WIN_H), pygame.SRCALPHA)
             ov.fill((8, 14, 22, 210))
             screen.blit(ov, (0, 0))
             msg = "PIPELINE HELD" if world.won else "PIPELINE OVERWHELMED"
-            text(msg, GW // 2 - 110, WIN_H // 2 - 30, F_L, PHOS if world.won else DANGER)
+            text(msg, GW // 2 - 110, 60, F_L, PHOS if world.won else DANGER)
+            if not world.won:
+                # incident post-mortem: what failed, on which kinds and nodes
+                deb = summarize_failure(world)
+                text(deb.cause, 40, 100, F_S, INK)
+                text("WHERE IT BROKE", 40, 132, F_S, MUTED)
+                for i, ln in enumerate(deb.lines[:6]):
+                    text("- " + ln, 48, 152 + i * 18, F_S, DANGER)
             text("Press R to retry, or edit loadout.py and F5.",
-                 GW // 2 - 150, WIN_H // 2 + 4, F_S, INK)
+                 GW // 2 - 150, WIN_H - 80, F_S, INK)
 
         pygame.display.flip()
 

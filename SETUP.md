@@ -25,6 +25,7 @@ Requires Python 3.11+ and pygame 2.6+.
 | `R`      | reset the run                            |
 | `P`      | pause / resume                           |
 | `E`      | toggle the in-game placement editor      |
+| `M`      | toggle the metrics dashboard             |
 | `D`      | cycle difficulty (easy/adaptive/overkill)|
 | `F5`     | reload your `loadout.py` (after editing) |
 | `L`      | ask your local LLM for help (optional)   |
@@ -65,6 +66,18 @@ Three load profiles for the incoming flood:
 - **overkill** — more volume and tighter bursts across the board.
 
 Cycling difficulty resets the run.
+
+## Metrics & the failure debrief
+
+Every run collects telemetry — the observability half of a pipeline. Press `M`
+for the dashboard: peak queue depth per node (red = it overflowed), handled vs.
+leaked per kind, a health trend line, and `cost / handled` (your
+over-provisioning KPI — spam turrets and it climbs).
+
+When you lose, the screen shows an **incident post-mortem**: whether latency or
+drops killed you, which kinds leaked (and whether they had *no consumer* vs.
+were *covered but overwhelmed*), and which nodes were the bottlenecks. Read it
+like a real alert-pipeline incident review, then fix the named weak spot.
 
 ## The one file you edit: `loadout.py`
 

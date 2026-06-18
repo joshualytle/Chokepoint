@@ -26,6 +26,7 @@ Requires Python 3.11+ and pygame 2.6+.
 | `P`      | pause / resume                           |
 | `E`      | toggle the in-game placement editor      |
 | `M`      | toggle the metrics dashboard             |
+| `S`      | save your build to `loadout.py`          |
 | `D`      | cycle difficulty (easy/adaptive/overkill)|
 | `F5`     | reload your `loadout.py` (after editing) |
 | `L`      | ask your local LLM for help (optional)   |
@@ -43,6 +44,10 @@ with the placement editor — press `E`. In the editor:
 
 Both paths run through the same budget: `loadout.py` is your *initial paid
 build*, and the editor spends from the same credits for changes.
+
+Press `S` to **save** your in-game build back to `loadout.py` — it generates the
+Python for you. Relaunch (or press `F5`) and you pick up right where you left
+off. That's the export: your work is just a `.py` file you own.
 
 ## Credits — design under a budget
 

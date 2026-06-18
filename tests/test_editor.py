@@ -148,6 +148,24 @@ def test_to_turrets_returns_fresh_list():
     assert len(ed.to_turrets()) == 1  # mutating the export didn't empty the editor
 
 
+def test_to_python_round_trips():
+    ed = full_editor()
+    ed.select_gun("sieve")
+    ed.toggle_module("range+")
+    ed.place(100, 120)
+    ed.select_gun("scatter")
+    ed.place(300, 300)
+
+    src = ed.to_python()
+    ns: dict = {}
+    exec(src, ns)  # noqa: S102 - exercising the generated loadout source
+    turrets = ns["build_loadout"](set(), [])
+
+    assert [t.gun.name for t in turrets] == ["sieve", "scatter"]
+    assert (turrets[0].x, turrets[0].y) == (100, 120)
+    assert any(m.name == "range+" for m in turrets[0].gun.modules)
+
+
 # ---- economy: editor spends from a bank when one is attached ---- #
 def banked_editor(balance: int) -> tuple[ArsenalEditor, Bank]:
     bank = Bank(balance)

@@ -8,6 +8,7 @@ Controls:
   P       pause / resume             F5  reload your loadout.py
   E       toggle the placement editor (buy/place/equip/remove turrets)
   M       toggle the metrics dashboard (queues, by-kind, health trend)
+  S       save the current build to loadout.py (resume it next launch / F5)
   D       cycle difficulty (easy / adaptive / overkill) — resets the run
   L       ask your local LLM for help (optional; off-thread, never freezes)
   hover   a turret or a legend swatch for a tooltip
@@ -158,6 +159,14 @@ def main() -> None:  # pragma: no cover - needs a display
                     edit_mode = not edit_mode
                 elif ev.key == pygame.K_m:
                     metrics_mode = not metrics_mode
+                elif ev.key == pygame.K_s:
+                    # save the current build to loadout.py so it loads next launch
+                    try:
+                        with open(loadout_mod.__file__, "w", encoding="utf-8") as fh:
+                            fh.write(editor.to_python())
+                        llm_state["text"] = f"Saved loadout to {loadout_mod.__file__}"
+                    except OSError as err:
+                        llm_state["text"] = f"Save failed: {err}"
                 elif ev.key == pygame.K_d:
                     difficulty_i = (difficulty_i + 1) % len(DIFFICULTY_LIST)
                     world.difficulty = DIFFICULTY_LIST[difficulty_i]

@@ -8,6 +8,7 @@ Controls:
   P       pause / resume             F5  reload your loadout.py
   E       toggle the placement editor (buy/place/equip/remove turrets)
   M       toggle the metrics dashboard (queues, by-kind, health trend)
+  H       toggle the help overlay (controls + kind/gun legend)
   S       save the current build to loadout.py (resume it next launch / F5)
   D       cycle difficulty (easy / adaptive / overkill) — resets the run
   L       ask your local LLM for help (optional; off-thread, never freezes)
@@ -29,7 +30,7 @@ from typing import Any
 
 from . import llm_assist
 from . import loadout as loadout_mod
-from .arsenal import MODULE_LIBRARY, gun_cost, make_gun
+from .arsenal import GUN_LIBRARY, MODULE_LIBRARY, gun_cost, make_gun
 from .editor import ArsenalEditor
 from .gates import DEFAULT_GATE_COST
 from .maps import GW, MAP_LIST, MAPS
@@ -71,6 +72,7 @@ def main() -> None:  # pragma: no cover - needs a display
     editor = ArsenalEditor(world.unlocked(), bank=world.bank)
     edit_mode = False
     metrics_mode = False
+    help_mode = False
     # palette rows registered each frame so panel clicks can be mapped to actions:
     # (rect, "gun"|"mod", name)
     palette_hits: list[tuple[Any, str, str]] = []
@@ -175,6 +177,8 @@ def main() -> None:  # pragma: no cover - needs a display
                     edit_mode = not edit_mode
                 elif ev.key == pygame.K_m:
                     metrics_mode = not metrics_mode
+                elif ev.key == pygame.K_h:
+                    help_mode = not help_mode
                 elif ev.key == pygame.K_s:
                     # save the current build to loadout.py so it loads next launch
                     try:
@@ -318,7 +322,7 @@ def main() -> None:  # pragma: no cover - needs a display
         if world.intermission > 0 and not world.over:
             text(f"Wave {world.level} incoming...", GW // 2 - 70, 14, F_M, INK)
         text(f"map: {world.map.name}   [ ] to switch", 12, WIN_H - 22, F_S, MUTED)
-        text(f"mode: {world.difficulty}   D to cycle", 12, WIN_H - 40, F_S, MUTED)
+        text(f"mode: {world.difficulty}   D to cycle   ·   H for help", 12, WIN_H - 40, F_S, MUTED)
 
         # ---- panel ----
         text("CHOKEPOINT", PANEL_X, 16, F_M, PHOS)
@@ -429,6 +433,47 @@ def main() -> None:  # pragma: no cover - needs a display
             pygame.draw.rect(screen, PHOS, (bx, by, w, h), 1, border_radius=5)
             for i, ln in enumerate(lines):
                 text(ln, bx + 8, by + 6 + i * 16, F_S, INK if i else PHOS)
+
+        # ---- help overlay (toggle H): controls + kind/gun legend ----
+        if help_mode and not world.over:
+            ov = pygame.Surface((GW, WIN_H), pygame.SRCALPHA)
+            ov.fill((8, 14, 22, 235))
+            screen.blit(ov, (0, 0))
+            text("HELP — H to close", 24, 20, F_M, PHOS)
+            controls = [
+                ("[ ]", "previous / next map"), ("E", "placement editor"),
+                ("G", "gate router (in editor)"), ("M", "metrics dashboard"),
+                ("S", "save build to loadout.py"), ("D", "cycle difficulty"),
+                ("P", "pause"), ("R", "reset"), ("F5", "reload loadout.py"),
+                ("L", "local-LLM help"),
+            ]
+            text("CONTROLS", 24, 52, F_S, MUTED)
+            yy = 70
+            for key, desc in controls:
+                text(f"{key:<4}", 28, yy, F_S, PHOS)
+                text(desc, 70, yy, F_S, INK)
+                yy += 17
+            text("In the editor: LMB place · LMB+modules on a turret = equip · "
+                 "RMB remove · gates snap to a fork", 24, yy + 2, F_S, MUTED)
+
+            yy += 30
+            text("ALERT KINDS", 24, yy, F_S, MUTED)
+            yy += 18
+            for k in KINDS:
+                pygame.draw.rect(screen, KINDS[k]["color"], (28, yy + 2, 9, 9))
+                text(f"{k:<11}{KINDS[k]['desc']}", 44, yy, F_S, INK)
+                yy += 17
+
+            yy += 14
+            text("GUNS  (name  cost  accepts)", 24, yy, F_S, MUTED)
+            yy += 18
+            for name in GUN_LIBRARY:
+                gun = make_gun(name)
+                text(f"{name:<11}{gun.cost:>4}cr  {','.join(sorted(gun.accepts))}",
+                     28, yy, F_S, INK)
+                yy += 17
+            text("Lose by drops (leaks) OR latency (queues age out your health). "
+                 "Cover every kind, with throughput.", 24, yy + 6, F_S, MUTED)
 
         # ---- metrics dashboard (toggle M): visualize the collected telemetry ----
         if metrics_mode and not world.over:

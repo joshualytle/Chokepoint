@@ -22,6 +22,7 @@ from dataclasses import dataclass
 
 from .arsenal import Turret, compute_synergy_mult, unlocked_at
 from .economy import Bank
+from .gates import Gate
 from .maps import Graph
 from .metrics import Telemetry
 from .packets import DIFFICULTIES, KIND_LIST, WAVES, Packet
@@ -62,6 +63,7 @@ class World:
     ):
         self.map = game_map
         self.turrets: list[Turret] = []
+        self.gates: list[Gate] = []
         self.difficulty = difficulty
         self.starting_credits = starting_credits
         # Created once and kept across resets; the editor holds this same object
@@ -77,6 +79,17 @@ class World:
             t.id = f"T{i + 1}"
             t.cd = 0.0
             t.node = self.map.nearest_node(t.x, t.y)
+
+    def set_gates(self, gates: list[Gate]) -> None:
+        """Place gates and bind each to its nearest branching node (a fork)."""
+        self.gates = gates
+        for i, g in enumerate(gates):
+            g.id = f"G{i + 1}"
+            node = self.map.nearest_branch_node(g.x, g.y)
+            g.node = node if node is not None else ""
+
+    def gate_at(self, node_id: str) -> Gate | None:
+        return next((g for g in self.gates if g.node == node_id), None)
 
     def reset(self) -> None:
         self.packets: list[Packet] = []
@@ -208,11 +221,16 @@ class World:
             if self.serves(p.at, p.kind):
                 p.wait += dt                      # waiting for service -> latency
                 continue
-            nxt = self.map.next_of(p.at)
-            if nxt is None:                       # unserved at the sink -> a drop
+            outs = self.map.branches(p.at)
+            if not outs:                          # unserved at the sink -> a drop
                 self._leak(p, "sink")
-            else:
-                p.moving_to, p.seg_pos = nxt, 0.0
+                continue
+            if len(outs) == 1:
+                idx = 0                           # linear node: only one way on
+            else:                                 # fork: a gate routes by kind
+                gate = self.gate_at(p.at)
+                idx = gate.branch_for(p.kind, len(outs)) if gate is not None else 0
+            p.moving_to, p.seg_pos = outs[idx], 0.0
 
     def _overflow(self) -> None:
         """A node holding more than QUEUE_CAP packets drops the excess (oldest)."""

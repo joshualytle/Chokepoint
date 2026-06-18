@@ -46,9 +46,25 @@ class Graph:
         return (n.x, n.y)
 
     def next_of(self, node_id: str) -> str | None:
-        """The downstream node along the (single, in phase 1) outgoing edge."""
+        """The first downstream node (a linear node has exactly one)."""
         outs = self.adj.get(node_id, [])
         return outs[0] if outs else None
+
+    def branches(self, node_id: str) -> list[str]:
+        """All downstream nodes from here (>1 means it's a branching node)."""
+        return self.adj.get(node_id, [])
+
+    def branching_nodes(self) -> list[str]:
+        """Nodes with more than one outgoing edge — where a gate matters."""
+        return [nid for nid in self.nodes if len(self.adj.get(nid, [])) > 1]
+
+    def nearest_branch_node(self, x: float, y: float) -> str | None:
+        """Nearest branching node to (x, y), or None if the map has no forks."""
+        forks = self.branching_nodes()
+        if not forks:
+            return None
+        return min(forks, key=lambda nid: (self.nodes[nid].x - x) ** 2
+                   + (self.nodes[nid].y - y) ** 2)
 
     def edge_len(self, a: str, b: str) -> float:
         ax, ay = self.pos(a)
@@ -65,12 +81,23 @@ class Graph:
                    + (self.nodes[nid].y - y) ** 2)
 
 
+def build_graph(name: str, coords: dict[str, tuple[float, float]],
+                edges: list[tuple[str, str]], source: str, sink: str,
+                slots: list[tuple[float, float]]) -> Graph:
+    """Generic graph builder from node coords + directed edges. Supports forks."""
+    nodes = {nid: Node(nid, x, y) for nid, (x, y) in coords.items()}
+    adj: dict[str, list[str]] = {nid: [] for nid in coords}
+    for a, b in edges:
+        adj[a].append(b)
+    return Graph(name, nodes, adj, source=source, sink=sink, slots=slots)
+
+
 def _linear(name: str, pts: list[tuple[float, float]],
             slots: list[tuple[float, float]]) -> Graph:
     """Build a single-trunk graph: one node per point, edge to the next."""
-    nodes = {f"n{i}": Node(f"n{i}", x, y) for i, (x, y) in enumerate(pts)}
-    adj = {f"n{i}": ([f"n{i + 1}"] if i + 1 < len(pts) else []) for i in range(len(pts))}
-    return Graph(name, nodes, adj, source="n0", sink=f"n{len(pts) - 1}", slots=slots)
+    coords = {f"n{i}": p for i, p in enumerate(pts)}
+    edges = [(f"n{i}", f"n{i + 1}") for i in range(len(pts) - 1)]
+    return build_graph(name, coords, edges, "n0", f"n{len(pts) - 1}", slots)
 
 
 MAPS: dict[str, Graph] = {

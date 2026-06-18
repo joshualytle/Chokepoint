@@ -1,6 +1,6 @@
 """Tests for the arsenal: gun stats, module attachment, synergies, unlocks."""
 
-from factory_defense.arsenal import (
+from chokepoint.arsenal import (
     GUN_LIBRARY,
     MODULE_LIBRARY,
     Turret,

@@ -1,4 +1,4 @@
-# HANDOFF — Packet Defense
+# HANDOFF — Chokepoint
 
 Kickoff briefing for a Claude Code session. Open the repo and start with:
 **"Read HANDOFF.md and CLAUDE.md, verify the build with `make check`, then
@@ -19,7 +19,7 @@ name the pipeline parallels, make small reviewable changes, don't over-engineer.
 
 ## Current state — VERIFIED
 
-- `python -m factory_defense` launches the game (desktop, pygame).
+- `python -m chokepoint` launches the game (desktop, pygame).
 - `make check` is green: **ruff clean, mypy clean, 15 tests passing.**
 - Pure logic (packets/arsenal/maps/simulation) has no pygame and is tested headless.
 - `loadout.py` is the player-edited file; `F5` hot-reloads it in-game.

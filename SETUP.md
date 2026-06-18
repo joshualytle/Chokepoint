@@ -1,4 +1,4 @@
-# SETUP — Packet Defense
+# SETUP — Chokepoint
 
 A typed-alert tower defense for learning Python. **Packets** are alerts of
 different kinds that flood a map; **turrets** are typed consumers that can only
@@ -11,7 +11,7 @@ placements so your coverage and throughput absorb the flood.
 python -m venv .venv
 source .venv/bin/activate           # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"             # or: pip install -r requirements.txt
-python -m factory_defense           # launch
+python -m chokepoint           # launch
 make check                          # ruff + mypy + 15 tests, all green
 ```
 
@@ -81,7 +81,7 @@ like a real alert-pipeline incident review, then fix the named weak spot.
 
 ## The one file you edit: `loadout.py`
 
-`src/factory_defense/loadout.py` is where you place and equip turrets — "all in
+`src/chokepoint/loadout.py` is where you place and equip turrets — "all in
 Python." Build a gun from the arsenal, attach unlocked modules, set its position,
 return the list. Edit it, then press `F5` in-game to reload.
 

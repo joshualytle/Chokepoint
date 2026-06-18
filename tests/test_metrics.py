@@ -1,9 +1,9 @@
 """Tests for the telemetry collector, histograms, and the failure debrief."""
 
-from factory_defense.arsenal import Turret, make_gun
-from factory_defense.maps import MAPS
-from factory_defense.metrics import Histogram, Telemetry, summarize_failure
-from factory_defense.simulation import World
+from chokepoint.arsenal import Turret, make_gun
+from chokepoint.maps import MAPS
+from chokepoint.metrics import Histogram, Telemetry, summarize_failure
+from chokepoint.simulation import World
 
 
 def step_for(world, seconds, dt=1 / 60):

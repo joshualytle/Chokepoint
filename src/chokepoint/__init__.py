@@ -1,4 +1,4 @@
-"""Factory Defense — a programmable, typed-alert tower-defense for learning Python.
+"""Chokepoint — a programmable, typed-alert tower-defense for learning Python.
 
 Packets are typed alerts that flood the pipeline; turrets are typed consumers
 that only process the kinds their gun accepts. Compose guns, modules, and

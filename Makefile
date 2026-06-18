@@ -1,4 +1,4 @@
-# Factory Defense — common tasks. Run `make help` for the list.
+# Chokepoint — common tasks. Run `make help` for the list.
 
 .PHONY: help install run test lint type check clean
 
@@ -14,7 +14,7 @@ install:
 	pip install -e ".[dev]"
 
 run:
-	python -m factory_defense
+	python -m chokepoint
 
 test:
 	pytest -q

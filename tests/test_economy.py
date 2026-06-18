@@ -1,9 +1,9 @@
 """Tests for the credit economy: Bank, gun costs, and wave income."""
 
-from factory_defense.arsenal import gun_cost, make_gun
-from factory_defense.economy import Bank
-from factory_defense.maps import MAPS
-from factory_defense.simulation import (
+from chokepoint.arsenal import gun_cost, make_gun
+from chokepoint.economy import Bank
+from chokepoint.maps import MAPS
+from chokepoint.simulation import (
     WAVE_INCOME_BASE,
     WAVE_INCOME_STEP,
     World,
@@ -37,7 +37,7 @@ def test_earn_adds():
 
 # ---- gun cost ---- #
 def test_gun_cost_includes_modules():
-    from factory_defense.arsenal import MODULE_LIBRARY
+    from chokepoint.arsenal import MODULE_LIBRARY
 
     bare = make_gun("sieve")
     base = gun_cost(bare)

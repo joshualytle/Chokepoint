@@ -4,11 +4,12 @@ Context for Claude Code working in this repo.
 
 ## What this is
 
-Packet Defense (package name `factory_defense`, historical) is a typed-alert
-tower-defense for learning Python. Packets are typed alerts that flood a map;
+Chokepoint (package `chokepoint`) is a typed-alert tower-defense for learning
+Python. Packets are typed alerts that flow a topology and queue at nodes;
 turrets are typed consumers that only process the kinds their gun accepts. It
 teaches the skills behind high-volume alert pipelines — **typed routing,
-consumer specialization/coverage, and flood/burst handling**.
+consumer specialization/coverage, queue/latency backpressure, and
+flood/burst handling**.
 
 ## Who I'm working with
 

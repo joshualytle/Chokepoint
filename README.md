@@ -1,4 +1,4 @@
-# Packet Defense
+# Chokepoint
 
 A typed-alert tower-defense for learning Python. **Packets** are alerts of
 different kinds (`auth`, `ids`, `dns`, `cloudtrail`, `endpoint`, `firewall`) that
@@ -14,7 +14,7 @@ routing, consumer specialization, coverage, and flood/burst handling** — as a 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-python -m factory_defense     # play
+python -m chokepoint     # play
 make check                    # ruff + mypy + 15 tests
 ```
 
@@ -24,7 +24,7 @@ local-LLM help. Requires Python 3.11+ and pygame 2.6+.
 ## Project layout
 
 ```
-src/factory_defense/
+src/chokepoint/
   packets.py      # alert kinds + wave definitions (flood/burst)
   arsenal.py      # drop-in guns, modules, turrets, synergies, unlocks
   maps.py         # multiple maps; each owns its path math

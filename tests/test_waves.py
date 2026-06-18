@@ -1,14 +1,14 @@
 """Tests for difficulty strategies (Easy / Adaptive / Overkill)."""
 
-from factory_defense.maps import MAPS
-from factory_defense.packets import (
+from chokepoint.maps import MAPS
+from chokepoint.packets import (
     DIFFICULTIES,
     WAVES,
     adaptive_wave,
     easy_wave,
     overkill_wave,
 )
-from factory_defense.simulation import World
+from chokepoint.simulation import World
 
 
 def total_count(wave) -> int:

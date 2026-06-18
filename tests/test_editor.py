@@ -1,8 +1,8 @@
 """Tests for the pure arsenal/placement editor (no pygame needed)."""
 
-from factory_defense.arsenal import Turret, gun_cost, make_gun, unlocked_at
-from factory_defense.economy import Bank
-from factory_defense.editor import ArsenalEditor
+from chokepoint.arsenal import Turret, gun_cost, make_gun, unlocked_at
+from chokepoint.economy import Bank
+from chokepoint.editor import ArsenalEditor
 
 
 def full_editor() -> ArsenalEditor:
@@ -220,8 +220,8 @@ def test_seed_purchase_free_mode_keeps_everything():
 
 
 def test_editor_and_world_share_one_bank_by_reference():
-    from factory_defense.maps import MAPS
-    from factory_defense.simulation import World
+    from chokepoint.maps import MAPS
+    from chokepoint.simulation import World
 
     w = World(MAPS["switchback"], starting_credits=500)
     ed = ArsenalEditor(w.unlocked(), bank=w.bank)

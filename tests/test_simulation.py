@@ -1,10 +1,10 @@
 """Headless tests for the typed-packet flow simulation (graph + queues)."""
 
-from factory_defense import llm_assist
-from factory_defense.arsenal import Turret, make_gun
-from factory_defense.loadout import build_loadout
-from factory_defense.maps import MAPS
-from factory_defense.simulation import START_HEALTH, World
+from chokepoint import llm_assist
+from chokepoint.arsenal import Turret, make_gun
+from chokepoint.loadout import build_loadout
+from chokepoint.maps import MAPS
+from chokepoint.simulation import START_HEALTH, World
 
 
 def make_world(turrets=None, map_name="switchback"):

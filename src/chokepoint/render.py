@@ -1,6 +1,6 @@
 """Pygame renderer + tooltips + map switching + loadout hot-reload + LLM helper.
 
-Run: ``python -m factory_defense``. Logic lives in the other modules; this only
+Run: ``python -m chokepoint``. Logic lives in the other modules; this only
 draws state and handles input.
 
 Controls:
@@ -43,7 +43,7 @@ def main() -> None:  # pragma: no cover - needs a display
     pygame.key.set_repeat(250, 30)
     WIN_W, WIN_H = 1100, 680
     screen = pygame.display.set_mode((WIN_W, WIN_H))
-    pygame.display.set_caption("Packet Defense — typed turrets vs an alert flood")
+    pygame.display.set_caption("Chokepoint — typed turrets vs an alert flood")
     clock = pygame.time.Clock()
 
     def font(sz: int, bold: bool = False):
@@ -263,7 +263,7 @@ def main() -> None:  # pragma: no cover - needs a display
         text(f"mode: {world.difficulty}   D to cycle", 12, WIN_H - 40, F_S, MUTED)
 
         # ---- panel ----
-        text("PACKET DEFENSE", PANEL_X, 16, F_M, PHOS)
+        text("CHOKEPOINT", PANEL_X, 16, F_M, PHOS)
         text(f"wave {world.level}", PANEL_X, 40, F_S, INK)
         leak_c = DANGER if world.leaks >= MAX_LEAK - 3 else INK
         text(f"leaks {world.leaks}/{MAX_LEAK}", PANEL_X + 110, 40, F_S, leak_c)

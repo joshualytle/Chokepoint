@@ -19,6 +19,7 @@ KINDS: dict[str, dict] = {
     "cloudtrail": {"color": (200, 140, 255), "desc": "Cloud API audit events (CloudTrail-style)."},
     "endpoint":   {"color": (229, 85, 110),  "desc": "Endpoint/EDR detections — heavy to process."},
     "firewall":   {"color": (174, 196, 214), "desc": "Firewall allow/deny and port scans."},
+    "email":      {"color": (235, 215, 90),  "desc": "Email-security / phishing-report alerts."},
 }
 KIND_LIST: list[str] = list(KINDS)
 
@@ -55,8 +56,9 @@ WAVES: list[list[tuple[str, int, float, float]]] = [
     [("auth", 8, 0.6, 0.0), ("ids", 8, 0.6, 1.0)],
     [("ids", 10, 0.5, 0.0), ("dns", 8, 0.7, 1.5)],
     [("firewall", 12, 0.4, 0.0), ("ids", 20, 0.18, 2.0)],            # ids burst
-    [("cloudtrail", 10, 0.6, 0.0), ("auth", 10, 0.5, 1.0), ("dns", 8, 0.6, 2.0)],
-    [("endpoint", 6, 1.2, 0.0), ("ids", 14, 0.3, 1.0),
+    [("cloudtrail", 10, 0.6, 0.0), ("auth", 10, 0.5, 1.0), ("dns", 8, 0.6, 2.0),
+     ("email", 8, 0.6, 2.5)],                                        # email arrives
+    [("endpoint", 6, 1.2, 0.0), ("ids", 14, 0.3, 1.0), ("email", 10, 0.4, 1.5),
      ("cloudtrail", 10, 0.5, 2.0), ("firewall", 16, 0.25, 3.0)],     # mixed flood
 ]
 
@@ -67,6 +69,7 @@ def synth_wave(i: int) -> list[tuple[str, int, float, float]]:
         ("ids", 12 + i, 0.3, 0.0),
         ("endpoint", i // 2, 1.0, 1.0),
         ("cloudtrail", i, 0.4, 2.0),
+        ("email", i, 0.5, 1.5),
         ("auth", 10 + i, 0.4, 0.0),
     ]
 

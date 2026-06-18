@@ -25,6 +25,10 @@ def test_registry_has_the_three_modes():
     assert set(DIFFICULTIES) >= {"easy", "adaptive", "overkill"}
 
 
+def test_email_kind_appears_in_the_curated_waves():
+    assert any(kind == "email" for wave in WAVES for kind, *_ in wave)
+
+
 # ---- easy = today's behavior ---- #
 def test_easy_reproduces_curated_waves():
     for i in range(len(WAVES)):

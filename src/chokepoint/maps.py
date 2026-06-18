@@ -133,5 +133,19 @@ MAPS: dict[str, Graph] = {
         source="n0", sink="n7",
         slots=[(340, 180), (340, 500), (520, 180)],
     ),
+    # Three lanes off one fork — a gate here can split traffic three ways.
+    "trident": build_graph(
+        "trident",
+        {"n0": (-30, 340), "n1": (170, 340),
+         "n2": (340, 120), "n3": (560, 120),       # top lane
+         "n4": (340, 340), "n5": (560, 340),       # middle lane
+         "n6": (340, 560), "n7": (560, 560),       # bottom lane
+         "n8": (650, 340), "n9": (760, 340)},
+        edges=[("n0", "n1"), ("n1", "n2"), ("n1", "n4"), ("n1", "n6"),
+               ("n2", "n3"), ("n3", "n8"), ("n4", "n5"), ("n5", "n8"),
+               ("n6", "n7"), ("n7", "n8"), ("n8", "n9")],
+        source="n0", sink="n9",
+        slots=[(340, 120), (340, 340), (340, 560)],
+    ),
 }
 MAP_LIST: list[str] = list(MAPS)

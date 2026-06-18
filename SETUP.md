@@ -116,8 +116,10 @@ for the kinds it accepts. Place a consumer where its kind actually piles up.
 
 - **Guns** have a *static* fire rate and a set of packet kinds they `accept`.
   Built-ins: `sieve` (auth/dns), `scatter` (ids/firewall), `auditor`
-  (cloudtrail), `lance` (endpoint). Add your own with the `@register_gun`
-  decorator in `arsenal.py` and it appears everywhere automatically.
+  (cloudtrail), `lance` (endpoint), `quarantine` (email). Add your own with the
+  `@register_gun` decorator in `arsenal.py` and it appears everywhere
+  automatically. Branching maps (`delta`, `trident`) let a gate split kinds
+  across lanes to the consumer that handles each.
 - **Modules** are upgrades you `attach()` to a gun — more range, more processing
   per shot, or coverage of an extra kind. You don't upgrade fire rate; you unlock
   modules by reaching later waves.

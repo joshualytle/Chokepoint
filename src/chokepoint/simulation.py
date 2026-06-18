@@ -91,6 +91,37 @@ class World:
     def gate_at(self, node_id: str) -> Gate | None:
         return next((g for g in self.gates if g.node == node_id), None)
 
+    def autoroute(self) -> None:
+        """Content-based routing: point each gate's kinds at the first branch
+        that reaches a turret accepting them. Recompute after turret/gate edits.
+
+        This is the gate "figuring out" where each kind's consumer lives — you
+        design the branches, the router sends traffic to the capable one.
+        """
+        for g in self.gates:
+            outs = self.map.branches(g.node)
+            routes: dict[str, int] = {}
+            for kind in KIND_LIST:
+                for i, branch in enumerate(outs):
+                    if self._branch_reaches_server(branch, kind):
+                        routes[kind] = i
+                        break
+            g.routes = routes
+
+    def _branch_reaches_server(self, start: str, kind: str) -> bool:
+        """Is there a turret accepting ``kind`` anywhere downstream of ``start``?"""
+        seen: set[str] = set()
+        stack = [start]
+        while stack:
+            n = stack.pop()
+            if n in seen:
+                continue
+            seen.add(n)
+            if self.serves(n, kind):
+                return True
+            stack.extend(self.map.branches(n))
+        return False
+
     def reset(self) -> None:
         self.packets: list[Packet] = []
         self.wave_idx = 0

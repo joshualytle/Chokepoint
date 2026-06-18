@@ -75,3 +75,28 @@ def test_gate_routes_traffic_to_the_serving_branch():
     w.set_gates([Gate(100, 100, routes={"auth": 1})])     # -> n1, auth to branch B
     step_for(w, 25)
     assert w.stats["auth"].handled > 0
+
+
+# ---- content-based auto-routing ---- #
+def test_autoroute_points_kinds_at_their_serving_branch():
+    w = World(fork_graph())
+    # sieve (auth/dns) on branch B (n3, index 1); branch A (n2) serves nothing
+    w.set_turrets([Turret(200, 160, make_gun("sieve"))])
+    w.set_gates([Gate(100, 100)])
+    w.autoroute()
+    g = w.gates[0]
+    assert g.routes.get("auth") == 1   # auth's consumer is down branch 1
+    assert "ids" not in g.routes       # nothing serves ids on either branch
+
+
+def test_autoroute_on_delta_splits_kinds_across_lanes():
+    from chokepoint.maps import MAPS
+    w = World(MAPS["delta"])
+    # sieve (auth/dns) on the top lane, auditor (cloudtrail) on the bottom lane
+    w.set_turrets([Turret(340, 180, make_gun("sieve")),
+                   Turret(340, 500, make_gun("auditor"))])
+    w.set_gates([Gate(180, 340)])
+    w.autoroute()
+    routes = w.gates[0].routes
+    assert routes["auth"] != routes["cloudtrail"]  # different lanes
+    assert routes["dns"] == routes["auth"]         # same consumer, same lane

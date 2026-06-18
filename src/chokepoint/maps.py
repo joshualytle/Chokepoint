@@ -119,5 +119,19 @@ MAPS: dict[str, Graph] = {
          (120, 520), (560, 520), (560, 260), (760, 260)],
         slots=[(250, 90), (240, 300), (430, 520)],
     ),
+    # A real branch: traffic splits at n1 into a top and bottom lane, then
+    # rejoins at n6. Place a gate at n1 to route each kind down the lane whose
+    # consumers can handle it.
+    "delta": build_graph(
+        "delta",
+        {"n0": (-30, 340), "n1": (180, 340),
+         "n2": (340, 180), "n3": (520, 180),       # top lane
+         "n4": (340, 500), "n5": (520, 500),       # bottom lane
+         "n6": (620, 340), "n7": (760, 340)},
+        edges=[("n0", "n1"), ("n1", "n2"), ("n1", "n4"),
+               ("n2", "n3"), ("n3", "n6"), ("n4", "n5"), ("n5", "n6"), ("n6", "n7")],
+        source="n0", sink="n7",
+        slots=[(340, 180), (340, 500), (520, 180)],
+    ),
 }
 MAP_LIST: list[str] = list(MAPS)

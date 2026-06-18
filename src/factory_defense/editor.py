@@ -13,7 +13,8 @@ terms this is your handler logic; the game loop is just the runtime around it.
 
 from __future__ import annotations
 
-from .arsenal import GUN_LIBRARY, MODULE_LIBRARY, Gun, Turret, make_gun
+from .arsenal import GUN_LIBRARY, MODULE_LIBRARY, Gun, Turret, gun_cost, make_gun
+from .economy import Bank
 
 # A click within this many pixels of a turret's center selects that turret.
 PICK_RADIUS = 14.0
@@ -31,12 +32,14 @@ class ArsenalEditor:
         world.set_turrets(ed.to_turrets())
     """
 
-    def __init__(self, unlocked: set[str] | None = None) -> None:
+    def __init__(self, unlocked: set[str] | None = None, bank: Bank | None = None) -> None:
         self.turrets: list[Turret] = []
         self.selected_gun: str | None = None
         self.pending_modules: list[str] = []
         # copy the set so later edits here don't mutate the caller's set
         self.unlocked: set[str] = set(unlocked or set())
+        # Shared with the World by reference; None means "no economy" (free mode).
+        self.bank: Bank | None = bank
 
     # ---- palette: what the player may choose, gated by unlocks ---- #
     def available_guns(self) -> list[str]:
@@ -102,10 +105,24 @@ class ArsenalEditor:
         return gun
 
     # ---- placing / picking / removing on the map ---- #
+    def pending_cost(self) -> int:
+        """Credit cost of the current selection (gun + queued modules); 0 if none.
+
+        The UI uses this to show a price tag and grey out unaffordable choices.
+        """
+        gun = self._build_gun()
+        return gun_cost(gun) if gun is not None else 0
+
     def place(self, x: float, y: float) -> Turret | None:
-        """Drop a turret with the selected gun at (x, y). None if no gun chosen."""
+        """Drop a turret with the selected gun at (x, y).
+
+        Returns None if no gun is selected, or if a bank is attached and the
+        balance can't cover the cost (nothing is charged in that case).
+        """
         gun = self._build_gun()
         if gun is None:
+            return None
+        if self.bank is not None and not self.bank.spend(gun_cost(gun)):
             return None
         turret = Turret(x, y, gun=gun)
         self.turrets.append(turret)
@@ -126,11 +143,17 @@ class ArsenalEditor:
         return min(in_range, key=lambda t: (t.x - x) ** 2 + (t.y - y) ** 2)
 
     def remove_at(self, x: float, y: float, radius: float = PICK_RADIUS) -> bool:
-        """Remove the turret under the click. True if one was removed."""
+        """Remove the turret under the click, refunding its cost. True if removed.
+
+        Full refund means the budget constrains *peak* deployment, not churn —
+        you can freely rearrange, but everything live at once must fit.
+        """
         target = self.turret_at(x, y, radius)
         if target is None:
             return False
         self.turrets.remove(target)
+        if self.bank is not None:
+            self.bank.earn(gun_cost(target.gun))
         return True
 
     def equip_at(self, x: float, y: float, module: str, radius: float = PICK_RADIUS) -> bool:
@@ -146,5 +169,8 @@ class ArsenalEditor:
             return False
         if any(m.name == module for m in target.gun.modules):
             return False
-        target.gun.attach(MODULE_LIBRARY[module])
+        mod = MODULE_LIBRARY[module]
+        if self.bank is not None and not self.bank.spend(mod.cost):
+            return False
+        target.gun.attach(mod)
         return True

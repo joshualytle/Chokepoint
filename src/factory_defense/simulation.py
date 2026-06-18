@@ -13,12 +13,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .arsenal import Turret, compute_synergy_mult, unlocked_at
+from .economy import Bank
 from .maps import GameMap
 from .packets import KIND_LIST, WAVES, Packet, synth_wave
 
 PACKET_VOLUME = 12.0
 PACKET_SPEED = 60.0
 MAX_LEAK = 12
+
+# Economy: starting budget, and income granted each time a wave is cleared.
+# Income scales with the wave number so spending power grows as threats escalate.
+STARTING_CREDITS = 250
+WAVE_INCOME_BASE = 100
+WAVE_INCOME_STEP = 25
 
 
 @dataclass
@@ -32,9 +39,13 @@ class KindStat:
 class World:
     """Runs one game on a given map with a given set of placed turrets."""
 
-    def __init__(self, game_map: GameMap):
+    def __init__(self, game_map: GameMap, starting_credits: int = STARTING_CREDITS):
         self.map = game_map
         self.turrets: list[Turret] = []
+        self.starting_credits = starting_credits
+        # Created once and kept across resets; the editor holds this same object
+        # by reference, so resetting must refill it (in reset) rather than swap it.
+        self.bank = Bank(starting_credits)
         self.reset()
 
     # ---- setup ---- #
@@ -58,6 +69,7 @@ class World:
         self.stats: dict[str, KindStat] = {k: KindStat() for k in KIND_LIST}
         for t in self.turrets:
             t.cd = 0.0
+        self.bank.balance = self.starting_credits  # refill in place; keep the reference
         self.load_wave(0)
 
     @property
@@ -148,10 +160,15 @@ class World:
                     target.dead = True
                     self.stats[target.kind].handled += 1
 
+    def wave_income(self, level: int) -> int:
+        """Credits granted for clearing the wave at ``level`` (scales upward)."""
+        return WAVE_INCOME_BASE + WAVE_INCOME_STEP * level
+
     def _wave_check(self) -> None:
         if (self.started and not self.over and not self.spawn_q
                 and self.intermission <= 0 and not self.packets):
             self.wave_idx += 1
+            self.bank.earn(self.wave_income(self.wave_idx))  # reward for the cleared wave
             if self.wave_idx >= len(WAVES) and self.wave_idx >= 12:
                 self.over, self.won = True, True
             else:

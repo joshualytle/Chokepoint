@@ -1,6 +1,7 @@
 """Tests for the pure arsenal/placement editor (no pygame needed)."""
 
-from factory_defense.arsenal import Turret, make_gun, unlocked_at
+from factory_defense.arsenal import Turret, gun_cost, make_gun, unlocked_at
+from factory_defense.economy import Bank
 from factory_defense.editor import ArsenalEditor
 
 
@@ -145,3 +146,68 @@ def test_to_turrets_returns_fresh_list():
     exported = ed.to_turrets()
     exported.clear()
     assert len(ed.to_turrets()) == 1  # mutating the export didn't empty the editor
+
+
+# ---- economy: editor spends from a bank when one is attached ---- #
+def banked_editor(balance: int) -> tuple[ArsenalEditor, Bank]:
+    bank = Bank(balance)
+    return ArsenalEditor(unlocked_at(99), bank=bank), bank
+
+
+def test_place_charges_the_bank():
+    ed, bank = banked_editor(1000)
+    ed.select_gun("sieve")
+    cost = ed.pending_cost()
+    assert cost == make_gun("sieve").cost
+    t = ed.place(100, 100)
+    assert t is not None
+    assert bank.balance == 1000 - cost
+
+
+def test_place_rejected_when_unaffordable_changes_nothing():
+    ed, bank = banked_editor(10)  # far less than any gun
+    ed.select_gun("sieve")
+    assert ed.place(100, 100) is None
+    assert bank.balance == 10          # not charged
+    assert ed.to_turrets() == []       # not placed
+
+
+def test_pending_cost_includes_queued_modules():
+    ed, _ = banked_editor(1000)
+    ed.select_gun("sieve")
+    bare = ed.pending_cost()
+    ed.toggle_module("range+")
+    assert ed.pending_cost() > bare
+
+
+def test_remove_refunds_the_bank():
+    ed, bank = banked_editor(1000)
+    ed.select_gun("auditor")
+    t = ed.place(100, 100)
+    assert t is not None
+    spent = 1000 - bank.balance
+    assert ed.remove_at(100, 100) is True
+    assert bank.balance == 1000        # full refund -> back to start
+    assert spent > 0
+
+
+def test_equip_charges_and_rejects_when_unaffordable():
+    ed, bank = banked_editor(100)
+    ed.select_gun("sieve")          # costs 90, leaving 10
+    ed.place(100, 100)
+    assert bank.balance == 10
+    # range+ costs 40 -> can't afford; turret keeps its modules unchanged
+    assert ed.equip_at(100, 100, "range+") is False
+    assert bank.balance == 10
+
+
+def test_editor_and_world_share_one_bank_by_reference():
+    from factory_defense.maps import MAPS
+    from factory_defense.simulation import World
+
+    w = World(MAPS["switchback"], starting_credits=500)
+    ed = ArsenalEditor(w.unlocked(), bank=w.bank)
+    ed.select_gun("sieve")
+    ed.place(100, 100)
+    # spending through the editor is visible on the world's bank — same object
+    assert w.bank.balance == 500 - gun_cost(make_gun("sieve"))

@@ -34,6 +34,7 @@ class Module:
     add_accepts: frozenset[str] = frozenset()
     range_bonus: float = 0.0
     damage_bonus: float = 0.0
+    cost: int = 0             # credits to attach this module (see economy.py)
 
 
 MODULE_LIBRARY: dict[str, Module] = {}
@@ -46,14 +47,16 @@ def register_module(mod: Module) -> Module:
 
 
 # Built-in modules. Add your own by calling register_module(Module(...)).
-register_module(Module("range+", "Extends processing range by 50.", unlock_wave=1, range_bonus=50))
-register_module(Module("amp", "Amplifier: +5 processing per shot.", unlock_wave=2, damage_bonus=5))
+register_module(Module("range+", "Extends processing range by 50.",
+                       unlock_wave=1, range_bonus=50, cost=40))
+register_module(Module("amp", "Amplifier: +5 processing per shot.",
+                       unlock_wave=2, damage_bonus=5, cost=60))
 register_module(Module("adapter_dns", "Lets a gun also accept DNS alerts.",
-                       unlock_wave=2, add_accepts=frozenset({"dns"})))
+                       unlock_wave=2, add_accepts=frozenset({"dns"}), cost=50))
 register_module(Module("dedup", "Deduplicator: collapses repeats, +6 effective processing.",
-                       unlock_wave=3, damage_bonus=6))
+                       unlock_wave=3, damage_bonus=6, cost=70))
 register_module(Module("adapter_endpoint", "Lets a gun also accept endpoint detections.",
-                       unlock_wave=4, add_accepts=frozenset({"endpoint"})))
+                       unlock_wave=4, add_accepts=frozenset({"endpoint"}), cost=80))
 
 
 # --------------------------------------------------------------------------- #
@@ -72,6 +75,7 @@ class Gun:
     base_range: float
     accepts: frozenset[str]
     unlock_wave: int = 0
+    cost: int = 0                          # credits to place this gun (see economy.py)
     modules: list[Module] = field(default_factory=list)
 
     def attach(self, module: Module) -> Gun:
@@ -116,28 +120,28 @@ def register_gun(name: str) -> Callable[[Callable[[], Gun]], Callable[[], Gun]]:
 def sieve() -> Gun:
     return Gun("sieve", "Fast filter for auth and DNS noise.",
                fire_rate=3.0, damage=6, base_range=150,
-               accepts=frozenset({"auth", "dns"}), unlock_wave=0)
+               accepts=frozenset({"auth", "dns"}), unlock_wave=0, cost=90)
 
 
 @register_gun("scatter")
 def scatter() -> Gun:
     return Gun("scatter", "Broad, rapid coverage of IDS and firewall traffic.",
                fire_rate=4.0, damage=4, base_range=140,
-               accepts=frozenset({"ids", "firewall"}), unlock_wave=0)
+               accepts=frozenset({"ids", "firewall"}), unlock_wave=0, cost=110)
 
 
 @register_gun("auditor")
 def auditor() -> Gun:
     return Gun("auditor", "Specialist for cloud audit events.",
                fire_rate=2.0, damage=9, base_range=160,
-               accepts=frozenset({"cloudtrail"}), unlock_wave=3)
+               accepts=frozenset({"cloudtrail"}), unlock_wave=3, cost=170)
 
 
 @register_gun("lance")
 def lance() -> Gun:
     return Gun("lance", "Heavy single-type processor for endpoint detections.",
                fire_rate=1.5, damage=18, base_range=170,
-               accepts=frozenset({"endpoint"}), unlock_wave=4)
+               accepts=frozenset({"endpoint"}), unlock_wave=4, cost=240)
 
 
 def make_gun(name: str) -> Gun:
@@ -145,6 +149,11 @@ def make_gun(name: str) -> Gun:
     if name not in GUN_LIBRARY:
         raise KeyError(f"unknown gun {name!r}; known: {sorted(GUN_LIBRARY)}")
     return GUN_LIBRARY[name]()
+
+
+def gun_cost(gun: Gun) -> int:
+    """Total credit cost of a gun: its base price plus every attached module."""
+    return gun.cost + sum(m.cost for m in gun.modules)
 
 
 # --------------------------------------------------------------------------- #

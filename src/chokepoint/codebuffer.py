@@ -9,16 +9,30 @@ from __future__ import annotations
 
 
 class TextBuffer:
+    UNDO_LIMIT = 250
+
     def __init__(self, text: str = "") -> None:
+        self._undo: list[tuple[list[str], int, int]] = []
         self.set_text(text)
 
     def set_text(self, text: str) -> None:
         self.lines: list[str] = text.split("\n") or [""]
         self.row = 0
         self.col = 0
+        self._undo.clear()
 
     def text(self) -> str:
         return "\n".join(self.lines)
+
+    def _snapshot(self) -> None:
+        """Record state before a mutation so it can be undone."""
+        self._undo.append((self.lines[:], self.row, self.col))
+        if len(self._undo) > self.UNDO_LIMIT:
+            self._undo.pop(0)
+
+    def undo(self) -> None:
+        if self._undo:
+            self.lines, self.row, self.col = self._undo.pop()
 
     def _clamp_col(self) -> None:
         self.col = max(0, min(self.col, len(self.lines[self.row])))
@@ -26,11 +40,13 @@ class TextBuffer:
     # ---- editing ---- #
     def insert(self, s: str) -> None:
         """Insert printable text (no newlines) at the cursor."""
+        self._snapshot()
         line = self.lines[self.row]
         self.lines[self.row] = line[: self.col] + s + line[self.col :]
         self.col += len(s)
 
     def newline(self) -> None:
+        self._snapshot()
         line = self.lines[self.row]
         self.lines[self.row] = line[: self.col]
         self.lines.insert(self.row + 1, line[self.col :])
@@ -38,6 +54,7 @@ class TextBuffer:
         self.col = 0
 
     def backspace(self) -> None:
+        self._snapshot()
         if self.col > 0:
             line = self.lines[self.row]
             self.lines[self.row] = line[: self.col - 1] + line[self.col :]
@@ -51,6 +68,7 @@ class TextBuffer:
 
     def delete(self) -> None:
         """Forward delete (the character to the right of the cursor)."""
+        self._snapshot()
         line = self.lines[self.row]
         if self.col < len(line):
             self.lines[self.row] = line[: self.col] + line[self.col + 1 :]

@@ -239,6 +239,8 @@ def main() -> None:  # pragma: no cover - needs a display
                     code_mode = False
                 elif (ev.mod & pygame.KMOD_CTRL) and ev.key == pygame.K_s:
                     apply_code(code_buf.text())
+                elif (ev.mod & pygame.KMOD_CTRL) and ev.key == pygame.K_z:
+                    code_buf.undo()
                 elif ev.key == pygame.K_RETURN:
                     code_buf.newline()
                 elif ev.key == pygame.K_BACKSPACE:
@@ -321,6 +323,20 @@ def main() -> None:  # pragma: no cover - needs a display
                     idx = ev.key - pygame.K_1
                     if idx < len(guns):
                         editor.select_gun(guns[idx])
+            elif ev.type == pygame.MOUSEBUTTONDOWN and code_mode and ev.button == 1:
+                mx, my = ev.pos  # click to position the caret in the editor
+                line_h, top, left = 16, 56, 52
+                avail = (WIN_H - top - 16) // line_h
+                first = max(0, min(code_buf.row - avail // 2,
+                                   max(0, len(code_buf.lines) - avail)))
+                r = first + (my - top) // line_h
+                if my >= top and 0 <= r < len(code_buf.lines):
+                    code_buf.row = r
+                    ln = code_buf.lines[r]
+                    c = 0
+                    while c < len(ln) and left + F_S.size(ln[: c + 1])[0] <= mx:
+                        c += 1
+                    code_buf.col = c
             elif ev.type == pygame.MOUSEBUTTONDOWN and edit_mode and not code_mode:
                 mx, my = ev.pos
                 if mx < GW:  # click on the playfield -> place / equip / remove
@@ -777,7 +793,8 @@ def main() -> None:  # pragma: no cover - needs a display
             ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
             ov.fill((6, 10, 16, 246))
             screen.blit(ov, (0, 0))
-            text("CODE — loadout.py     Ctrl+S apply  ·  Esc close", 16, 12, F_M, PHOS)
+            text("CODE — loadout.py   Ctrl+S apply · Ctrl+Z undo · click to move · Esc close",
+                 16, 12, F_S, PHOS)
             if code_status["msg"]:
                 ok = not code_status["msg"].startswith("error")
                 text(code_status["msg"], 16, 34, F_S, PHOS if ok else DANGER)

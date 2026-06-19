@@ -61,6 +61,29 @@ def test_home_end():
     assert b.col == 0
 
 
+def test_undo_reverts_edits_in_order():
+    b = TextBuffer("ab")
+    b.end()
+    b.insert("c")           # "abc"
+    b.insert("d")           # "abcd"
+    assert b.text() == "abcd"
+    b.undo()
+    assert b.text() == "abc"
+    b.undo()
+    assert b.text() == "ab"
+    b.undo()                # nothing left -> no crash, no change
+    assert b.text() == "ab"
+
+
+def test_undo_restores_cursor_across_newline():
+    b = TextBuffer("ab")
+    b.end()
+    b.newline()
+    assert (b.row, b.col) == (1, 0)
+    b.undo()
+    assert b.lines == ["ab"] and (b.row, b.col) == (0, 2)
+
+
 def test_edit_sequence_builds_expected_source():
     b = TextBuffer("")
     for ch in "def f():":

@@ -5,6 +5,10 @@ different kinds that flood a map; **turrets** are typed consumers that can only
 process the kinds their **gun** accepts. You win by composing guns, modules, and
 placements so your coverage and throughput absorb the flood.
 
+New here? A short **walkthrough** appears on launch (press any key to start),
+and a live **COACH** line at the bottom-left always names the most important
+thing to fix right now — press `M` for the full coaching list and metrics.
+
 ## Install & run
 
 ```bash

@@ -89,6 +89,7 @@ def main() -> None:  # pragma: no cover - needs a display
     code_buf = TextBuffer()
     code_status: dict[str, str] = {"msg": ""}
     code_scroll = 0              # first visible line in the editor (mouse-wheel scroll)
+    show_intro = True            # one-time welcome/walkthrough overlay
     # palette rows registered each frame so panel clicks can be mapped to actions:
     # (rect, "gun"|"mod", name)
     palette_hits: list[tuple[Any, str, str]] = []
@@ -236,6 +237,8 @@ def main() -> None:  # pragma: no cover - needs a display
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
                 running = False
+            elif show_intro and ev.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+                show_intro = False  # any key/click dismisses the welcome overlay
             elif ev.type == pygame.KEYDOWN and code_mode:
                 # the code editor captures all typing while open
                 if ev.key == pygame.K_ESCAPE:
@@ -417,7 +420,7 @@ def main() -> None:  # pragma: no cover - needs a display
         # keep the editor palette in step with what the current wave has unlocked
         editor.set_unlocked(world.unlocked())
 
-        if not world.paused and not world.over and not code_mode:
+        if not world.paused and not world.over and not code_mode and not show_intro:
             acc = dt
             while acc > 0:
                 world.step(min(1 / 60, acc))
@@ -852,6 +855,33 @@ def main() -> None:  # pragma: no cover - needs a display
                     text("- " + ln, 48, 152 + i * 18, F_S, DANGER)
             text("Press R to retry, or edit loadout.py and F5.",
                  GW // 2 - 150, WIN_H - 80, F_S, INK)
+
+        # welcome / walkthrough overlay (shown once at launch)
+        if show_intro:
+            ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+            ov.fill((8, 14, 22, 238))
+            screen.blit(ov, (0, 0))
+            intro = [
+                ("CHOKEPOINT", F_L, PHOS),
+                ("A pipeline of typed alerts floods toward the exit.", F_M, INK),
+                ("Turrets are consumers: each only processes the alert kinds its", F_S, INK),
+                ("gun accepts. Place them where alerts queue, and cover every kind.", F_S, INK),
+                ("", F_S, INK),
+                ("You lose two ways: uncovered kinds LEAK, and queues that back", F_S, INK),
+                ("up too long bleed your HEALTH (latency). Build for both.", F_S, INK),
+                ("", F_S, INK),
+                ("E  build & place turrets / gates (G) / limiters (B)", F_S, PHOS),
+                ("T  design the topology     C  edit the loadout code", F_S, PHOS),
+                ("M  metrics & coaching      H  full controls + legend", F_S, PHOS),
+                ("", F_S, INK),
+                ("The COACH line (bottom-left) always tells you what to fix next.", F_S, AMBER),
+                ("", F_S, INK),
+                ("press any key to start", F_M, MUTED),
+            ]
+            y = 90
+            for txt, fnt, col in intro:
+                text(txt, WIN_W // 2 - fnt.size(txt)[0] // 2, y, fnt, col)
+                y += fnt.get_height() + 6
 
         pygame.display.flip()
 

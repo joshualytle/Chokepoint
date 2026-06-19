@@ -181,6 +181,16 @@ def main() -> None:  # pragma: no cover - needs a display
     def text(s: str, x: int, y: int, f=F_S, c=INK) -> None:
         screen.blit(f.render(s, True, c), (x, y))
 
+    def tooltip(lines: list[str], accent=PHOS) -> None:
+        """Draw a hover tooltip box at the cursor; first line is the accented title."""
+        w = max(F_S.size(s)[0] for s in lines) + 16
+        h = len(lines) * 16 + 10
+        bx, by = min(mouse[0] + 12, GW - w), min(mouse[1] + 12, WIN_H - h)
+        pygame.draw.rect(screen, PANEL2, (bx, by, w, h), border_radius=5)
+        pygame.draw.rect(screen, accent, (bx, by, w, h), 1, border_radius=5)
+        for i, ln in enumerate(lines):
+            text(ln, bx + 8, by + 6 + i * 16, F_S, INK if i else accent)
+
     PANEL_X = GW + 10
     running = True
     while running:
@@ -551,7 +561,11 @@ def main() -> None:  # pragma: no cover - needs a display
             for i, ln in enumerate(wrap(llm_state["text"], panel_w - 26, F_S)[:7]):
                 text(ln, PANEL_X + 10, row + 28 + i * 16, F_S, INK)
 
-        # tooltip on top of everything
+        # hover tooltips (turret > gate > limiter > node), on top of everything
+        hovered_node = node_under(mouse[0], mouse[1]) if mouse[0] < GW else None
+        hovered_gate = next((g for g in world.gates if g.node == hovered_node), None)
+        hovered_limiter = next((m for m in world.limiters if m.node == hovered_node), None)
+
         if hovered_turret is not None:
             g = hovered_turret.gun
             lines = [
@@ -567,13 +581,34 @@ def main() -> None:  # pragma: no cover - needs a display
             if g.modules:
                 lines.append("modules: " + ", ".join(m.name for m in g.modules))
             lines.append(f"cost {gun_cost(g)}cr")
-            w = max(F_S.size(s)[0] for s in lines) + 16
-            h = len(lines) * 16 + 10
-            bx, by = min(mouse[0] + 12, GW - w), mouse[1] + 12
-            pygame.draw.rect(screen, PANEL2, (bx, by, w, h), border_radius=5)
-            pygame.draw.rect(screen, PHOS, (bx, by, w, h), 1, border_radius=5)
-            for i, ln in enumerate(lines):
-                text(ln, bx + 8, by + 6 + i * 16, F_S, INK if i else PHOS)
+            tooltip(lines)
+        elif hovered_gate is not None:
+            outs = world.map.branches(hovered_gate.node)
+            lines = [f"{hovered_gate.id}: gate @ {hovered_gate.node}", "routes by kind:"]
+            for i, bnode in enumerate(outs):
+                routed = [k for k, idx in hovered_gate.routes.items() if idx == i]
+                lines.append(f"  -> {bnode}: {', '.join(routed) if routed else '(none)'}")
+            tooltip(lines, GATE_C)
+        elif hovered_limiter is not None:
+            buffered = [p for p in world.queue_at(hovered_limiter.node)
+                        if not world.serves(hovered_limiter.node, p.kind)]
+            tooltip([f"{hovered_limiter.id}: quelimiter @ {hovered_limiter.node}",
+                     f"release {hovered_limiter.release_rate:.0f}/s",
+                     f"buffered {len(buffered)}/{hovered_limiter.buffer_cap}"], AMBER)
+        elif hovered_node is not None:
+            q = world.queue_at(hovered_node)
+            cap = (world.limiter_at(hovered_node).buffer_cap  # type: ignore[union-attr]
+                   if world.limiter_at(hovered_node) else QUEUE_CAP)
+            served: set[str] = set()
+            for t in world.turrets:
+                if t.node == hovered_node:
+                    served |= t.accepts()
+            role = ("source" if hovered_node == world.map.source else
+                    "sink" if hovered_node == world.map.sink else "node")
+            tooltip([f"{role} {hovered_node}",
+                     f"queue {len(q)}/{cap}",
+                     "serves: " + (", ".join(sorted(served)) if served else "(pass-through)")],
+                    INK)
 
         # ---- help overlay (toggle H): controls + kind/gun legend ----
         if help_mode and not world.over:

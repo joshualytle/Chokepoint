@@ -37,6 +37,7 @@ from .arsenal import GUN_LIBRARY, MODULE_LIBRARY, gun_cost, make_gun
 from .codebuffer import TextBuffer
 from .editor import ArsenalEditor
 from .gates import DEFAULT_GATE_COST
+from .hints import coaching
 from .limiter import DEFAULT_LIMITER_COST
 from .maps import GW, MAP_LIST, MAPS
 from .metrics import summarize_failure
@@ -422,6 +423,9 @@ def main() -> None:  # pragma: no cover - needs a display
                 world.step(min(1 / 60, acc))
                 acc -= 1 / 60
 
+        coach = coaching(world)  # live advice; top one is shown, all listed in metrics
+        coach_c = {"danger": DANGER, "warn": AMBER, "tip": (130, 170, 255), "ok": PHOS}
+
         # ---- draw playfield ----
         screen.fill(BG)
         for x in range(0, GW, 40):
@@ -549,6 +553,9 @@ def main() -> None:  # pragma: no cover - needs a display
             text(f"Wave {world.level} incoming...", GW // 2 - 70, 14, F_M, INK)
         text(f"map: {world.map.name}   [ ] to switch", 12, WIN_H - 22, F_S, MUTED)
         text(f"mode: {world.difficulty}   D to cycle   ·   H for help", 12, WIN_H - 40, F_S, MUTED)
+        # live coach: the single most important thing to fix right now
+        if coach and not build_mode and not code_mode and not world.over:
+            text("COACH: " + coach[0].text, 12, WIN_H - 78, F_S, coach_c[coach[0].level])
         # transient action feedback (save/reload/over-budget/difficulty), always visible
         if toast["ttl"] > 0:
             toast["ttl"] -= dt
@@ -789,6 +796,12 @@ def main() -> None:  # pragma: no cover - needs a display
                 pygame.draw.line(screen, PHOS, a, b, 1)
             eff = tel.efficiency(world)
             text(f"cost / handled: {eff['cost_per_handled']:.0f}cr", 24, yy + 52, F_S, INK)
+            # coach: everything worth fixing, not just the top line
+            text("COACH", 360, 56, F_S, MUTED)
+            for i, h in enumerate(coach):
+                for j, ln in enumerate(wrap(h.text, GW - 380, F_S)):
+                    text(("- " if j == 0 else "  ") + ln, 360, 76 + i * 34 + j * 16,
+                         F_S, coach_c[h.level])
 
         # in-app code editor (toggle C): edit loadout.py, Ctrl+S to apply
         if code_mode:

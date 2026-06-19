@@ -447,6 +447,7 @@ def main() -> None:  # pragma: no cover - needs a display
                 nx, ny = (int(v) for v in world.map.pos(nid))
                 ring = GATE_C if nid in (world.map.source, world.map.sink) else PHOS
                 pygame.draw.circle(screen, ring, (nx, ny), 16, 1)
+                text(nid, nx + 10, ny + 6, F_S, MUTED)  # label so you can see what you connect
             sx, sy = (int(v) for v in world.map.pos(world.map.source))
             kx, ky = (int(v) for v in world.map.pos(world.map.sink))
             text("src", sx - 9, sy + 18, F_S, GATE_C)
@@ -699,6 +700,9 @@ def main() -> None:  # pragma: no cover - needs a display
                 pygame.draw.line(screen, PHOS, a, b, 1)
             eff = tel.efficiency(world)
             text(f"cost / handled: {eff['cost_per_handled']:.0f}cr", 24, yy + 52, F_S, INK)
+
+        if world.paused and not world.over:
+            text("|| PAUSED — press P", GW // 2 - 70, 36, F_M, AMBER)
 
         if world.over:
             ov = pygame.Surface((GW, WIN_H), pygame.SRCALPHA)

@@ -434,28 +434,32 @@ def main() -> None:  # pragma: no cover - needs a display
             text("click+place / drag to map · LMB turret=equip · RMB remove",
                  PANEL_X, row, F_S, MUTED)
             row += 20
-            text("GUNS  (click or 1-9)", PANEL_X, row, F_S, MUTED)
+            text("GUNS  (click/drag or 1-9; swatches = kinds)", PANEL_X, row, F_S, MUTED)
             row += 17
             for i, name in enumerate(editor.available_guns()):
                 g = make_gun(name)
                 sel = name == editor.selected_gun
                 color = PHOS if sel else (INK if world.bank.can_afford(g.cost) else MUTED)
                 palette_hits.append((pygame.Rect(PANEL_X, row - 1, panel_w, 17), "gun", name))
-                text(f"{i + 1} {name:<8}{g.cost:>4}cr  {','.join(sorted(g.accepts))}",
-                     PANEL_X + 2, row, F_S, color)
+                text(f"{i + 1} {name:<9}{g.cost:>4}cr", PANEL_X + 2, row, F_S, color)
+                for si, k in enumerate(sorted(g.accepts)):  # accepted kinds as swatches
+                    pygame.draw.rect(screen, KINDS[k]["color"],
+                                     (PANEL_X + 150 + si * 9, row + 2, 7, 7))
                 row += 17
             row += 6
             text("MODULES  (click to queue)", PANEL_X, row, F_S, MUTED)
             row += 17
-            for name in editor.available_modules():
+            mods = editor.available_modules()
+            col_w = panel_w // 2
+            for i, name in enumerate(mods):  # two columns to save vertical space
                 mod = MODULE_LIBRARY[name]
                 queued = name in editor.pending_modules
                 color = PHOS if queued else (INK if world.bank.can_afford(mod.cost) else MUTED)
-                palette_hits.append((pygame.Rect(PANEL_X, row - 1, panel_w, 17), "mod", name))
-                text(f"[{'x' if queued else ' '}] {name:<15}{mod.cost:>3}cr",
-                     PANEL_X + 2, row, F_S, color)
-                row += 17
-            row += 6
+                cellx = PANEL_X + (i % 2) * col_w
+                celly = row + (i // 2) * 17
+                palette_hits.append((pygame.Rect(cellx, celly - 1, col_w, 17), "mod", name))
+                text(f"[{'x' if queued else ' '}] {name} {mod.cost}", cellx + 2, celly, F_S, color)
+            row += ((len(mods) + 1) // 2) * 17 + 6
             text("FLOW DEVICES  (click, G gate / B limiter)", PANEL_X, row, F_S, MUTED)
             row += 17
             gcolor = GATE_C if editor.placing_gate else (

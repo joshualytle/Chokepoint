@@ -42,6 +42,7 @@ from .maps import GW, MAP_LIST, MAPS
 from .metrics import summarize_failure
 from .packets import DIFFICULTY_LIST, KINDS
 from .simulation import MAX_LEAK, QUEUE_CAP, START_HEALTH, World
+from .syntax import spans as code_spans
 
 QUEUE_WARN = QUEUE_CAP - 2  # queue depth at which a node's marker turns red
 
@@ -801,10 +802,14 @@ def main() -> None:  # pragma: no cover - needs a display
             line_h, top = 16, 56
             avail = (WIN_H - top - 16) // line_h
             first = max(0, min(code_buf.row - avail // 2, max(0, len(code_buf.lines) - avail)))
+            syntax_c = {"kw": (130, 170, 255), "num": AMBER, "comment": MUTED}
             for i in range(first, min(len(code_buf.lines), first + avail)):
                 y = top + (i - first) * line_h
                 text(f"{i + 1:>3}", 16, y, F_S, MUTED)
-                text(code_buf.lines[i], 52, y, F_S, INK)
+                cx = 52
+                for tok, kind in code_spans(code_buf.lines[i]):  # syntax highlighting
+                    text(tok, cx, y, F_S, syntax_c.get(kind, INK))
+                    cx += F_S.size(tok)[0]
                 if i == code_buf.row:  # caret
                     cx = 52 + F_S.size(code_buf.lines[i][: code_buf.col])[0]
                     pygame.draw.line(screen, PHOS, (cx, y), (cx, y + 14), 1)

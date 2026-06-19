@@ -96,14 +96,19 @@ def main() -> None:  # pragma: no cover - needs a display
     def say(text: str, ok: bool = True) -> None:
         toast["text"], toast["ttl"], toast["ok"] = text, 2.5, ok
 
-    def deploy_loadout(refund_current: bool = False) -> None:
+    def deploy_loadout(refund_current: bool = False, load_topology: bool = True) -> None:
         """(Re)build turrets from loadout.py, costed against the budget.
 
         The editor is the single source of truth; loadout.py is its initial paid
         build. ``refund_current`` (used by F5) returns the cost of whatever is
         deployed before re-buying, so reloading the file never double-charges.
+        ``load_topology`` applies a saved custom map (skipped when switching maps).
         """
         nonlocal editor
+        build_topology = getattr(loadout_mod, "build_topology", None)
+        if load_topology and build_topology is not None:
+            world.map = build_topology()   # resume a designed map
+            world.packets.clear()
         if refund_current:
             for t in world.turrets:
                 world.bank.earn(gun_cost(t.gun))
@@ -175,7 +180,7 @@ def main() -> None:  # pragma: no cover - needs a display
         map_i = (map_i + delta) % len(MAP_LIST)
         world = World(MAPS[MAP_LIST[map_i]].copy(), difficulty=DIFFICULTY_LIST[difficulty_i])
         edit_mode = False
-        deploy_loadout()
+        deploy_loadout(load_topology=False)  # an explicit map choice ignores the saved one
 
     def ask_llm() -> None:
         llm_state["status"] = "thinking"
@@ -295,8 +300,8 @@ def main() -> None:  # pragma: no cover - needs a display
                     # save the current build to loadout.py so it loads next launch
                     try:
                         with open(loadout_mod.__file__, "w", encoding="utf-8") as fh:
-                            fh.write(editor.to_python())
-                        say("Saved build to loadout.py")
+                            fh.write(editor.to_python(world.map))
+                        say("Saved build + topology to loadout.py")
                     except OSError as err:
                         say(f"Save failed: {err}", ok=False)
                 elif ev.key == pygame.K_d:

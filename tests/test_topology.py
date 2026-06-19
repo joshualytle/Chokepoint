@@ -89,6 +89,24 @@ def test_copy_is_independent_of_the_base():
 
 
 # ---- world rebind after an edit ---- #
+def test_to_python_round_trips_a_custom_topology():
+    from chokepoint.editor import ArsenalEditor
+    g = trunk()
+    extra = g.add_node(120, 90)   # fork off n1 and rejoin the sink
+    g.add_edge("n1", extra)
+    g.add_edge(extra, "n2")
+
+    src = ArsenalEditor().to_python(g)
+    ns: dict = {}
+    exec(src, ns)  # noqa: S102 - exercising the generated loadout source
+    rebuilt = ns["build_topology"]()
+
+    assert set(rebuilt.nodes) == set(g.nodes)
+    assert sorted(rebuilt.edges()) == sorted(g.edges())
+    assert (rebuilt.source, rebuilt.sink) == (g.source, g.sink)
+    assert rebuilt.branches("n1") == g.branches("n1")  # the fork survived
+
+
 def test_rebind_snaps_turret_to_a_new_node():
     g = trunk()
     w = World(g)

@@ -80,6 +80,11 @@ def main() -> None:  # pragma: no cover - needs a display
     # (rect, "gun"|"mod", name)
     palette_hits: list[tuple[Any, str, str]] = []
     llm_state: dict[str, str] = {"status": "idle", "text": "Press L for local-LLM help."}
+    # transient action feedback, shown in every mode (unlike the LLM box)
+    toast: dict[str, Any] = {"text": "", "ttl": 0.0, "ok": True}
+
+    def say(text: str, ok: bool = True) -> None:
+        toast["text"], toast["ttl"], toast["ok"] = text, 2.5, ok
 
     def deploy_loadout(refund_current: bool = False) -> None:
         """(Re)build turrets from loadout.py, costed against the budget.
@@ -109,9 +114,7 @@ def main() -> None:  # pragma: no cover - needs a display
             editor.seed_purchase_limiters(build_limiters(world.unlocked(), world.map.slots))
         sync_world()
         if dropped:
-            llm_state["text"] = (
-                f"Over budget: {len(dropped)} loadout turret(s) not deployed."
-            )
+            say(f"Over budget: {len(dropped)} loadout turret(s) not deployed.", ok=False)
 
     def sync_world() -> None:
         """Push the editor's turrets, gates, and limiters to the world; re-route."""
@@ -181,7 +184,7 @@ def main() -> None:  # pragma: no cover - needs a display
                 elif ev.key == pygame.K_F5:
                     importlib.reload(loadout_mod)
                     deploy_loadout(refund_current=True)
-                    llm_state["text"] = "Loadout reloaded."
+                    say("Loadout reloaded from loadout.py")
                 elif ev.key == pygame.K_e:
                     edit_mode = not edit_mode
                 elif ev.key == pygame.K_m:
@@ -193,14 +196,15 @@ def main() -> None:  # pragma: no cover - needs a display
                     try:
                         with open(loadout_mod.__file__, "w", encoding="utf-8") as fh:
                             fh.write(editor.to_python())
-                        llm_state["text"] = f"Saved loadout to {loadout_mod.__file__}"
+                        say("Saved build to loadout.py")
                     except OSError as err:
-                        llm_state["text"] = f"Save failed: {err}"
+                        say(f"Save failed: {err}", ok=False)
                 elif ev.key == pygame.K_d:
                     difficulty_i = (difficulty_i + 1) % len(DIFFICULTY_LIST)
                     world.difficulty = DIFFICULTY_LIST[difficulty_i]
                     world.reset()
                     deploy_loadout()
+                    say(f"difficulty: {world.difficulty} (run reset)")
                 elif ev.key == pygame.K_l:
                     ask_llm()
                 elif edit_mode and ev.key == pygame.K_g:
@@ -365,6 +369,10 @@ def main() -> None:  # pragma: no cover - needs a display
             text(f"Wave {world.level} incoming...", GW // 2 - 70, 14, F_M, INK)
         text(f"map: {world.map.name}   [ ] to switch", 12, WIN_H - 22, F_S, MUTED)
         text(f"mode: {world.difficulty}   D to cycle   ·   H for help", 12, WIN_H - 40, F_S, MUTED)
+        # transient action feedback (save/reload/over-budget/difficulty), always visible
+        if toast["ttl"] > 0:
+            toast["ttl"] -= dt
+            text(toast["text"], 12, WIN_H - 60, F_S, PHOS if toast["ok"] else DANGER)
 
         # ---- panel ----
         text("CHOKEPOINT", PANEL_X, 16, F_M, PHOS)

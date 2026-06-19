@@ -60,3 +60,23 @@ def test_unlocks_grow_with_waves():
     late = unlocked_at(5)
     assert early <= late
     assert "lance" not in early and "lance" in late  # endpoint gun unlocks later
+
+
+def test_quarantine_covers_the_email_kind():
+    gun = make_gun("quarantine")
+    assert "email" in gun.accepts
+    assert gun.fire_rate > 0
+
+
+def test_adapter_email_adds_email_coverage():
+    gun = make_gun("sieve")
+    assert "email" not in gun.effective_accepts()
+    gun.attach(MODULE_LIBRARY["adapter_email"])
+    assert "email" in gun.effective_accepts()
+
+
+def test_inbox_correlation_synergy():
+    a = Turret(0, 0, make_gun("quarantine"), id="T1")
+    b = Turret(0, 0, make_gun("sieve"), id="T2")
+    mult = compute_synergy_mult([a, b])
+    assert mult["T1"] > 1.0 and mult["T2"] > 1.0

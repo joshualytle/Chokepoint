@@ -8,6 +8,7 @@ Controls:
   P       pause / resume             F5  reload your loadout.py
   E       toggle the placement editor (buy/place/equip/remove turrets)
   M       toggle the metrics dashboard (queues, by-kind, health trend)
+  H       toggle the help overlay (controls + kind/gun legend)
   S       save the current build to loadout.py (resume it next launch / F5)
   D       cycle difficulty (easy / adaptive / overkill) — resets the run
   L       ask your local LLM for help (optional; off-thread, never freezes)
@@ -16,8 +17,9 @@ Controls:
 Editor (press E): click a gun in the palette (or 1-9) to select it, click a
 module row to queue it, then left-click the map to place. Left-click an existing
 turret to equip your queued modules onto it; right-click to remove (full refund).
-Pick the gate router (click it or press G) and left-click near a fork to place a
-gate; it auto-routes each kind to the branch whose consumers can handle it.
+Pick the gate router (G) and left-click near a fork to place a gate; it
+auto-routes each kind to the branch whose consumers can handle it. Pick the
+quelimiter (B) and left-click a node to place a buffer that smooths a burst.
 Everything is charged against your credits, which grow as you clear waves.
 """
 
@@ -29,9 +31,10 @@ from typing import Any
 
 from . import llm_assist
 from . import loadout as loadout_mod
-from .arsenal import MODULE_LIBRARY, gun_cost, make_gun
+from .arsenal import GUN_LIBRARY, MODULE_LIBRARY, gun_cost, make_gun
 from .editor import ArsenalEditor
 from .gates import DEFAULT_GATE_COST
+from .limiter import DEFAULT_LIMITER_COST
 from .maps import GW, MAP_LIST, MAPS
 from .metrics import summarize_failure
 from .packets import DIFFICULTY_LIST, KINDS
@@ -64,6 +67,7 @@ def main() -> None:  # pragma: no cover - needs a display
     PHOS = (56, 225, 176)
     DANGER = (229, 85, 110)
     GATE_C = (240, 200, 120)
+    AMBER = (242, 200, 90)
 
     map_i = 0
     difficulty_i = 0
@@ -71,10 +75,17 @@ def main() -> None:  # pragma: no cover - needs a display
     editor = ArsenalEditor(world.unlocked(), bank=world.bank)
     edit_mode = False
     metrics_mode = False
+    help_mode = False
+    drag_item: tuple[str, str] | None = None  # (kind, name) being dragged from the palette
     # palette rows registered each frame so panel clicks can be mapped to actions:
     # (rect, "gun"|"mod", name)
     palette_hits: list[tuple[Any, str, str]] = []
     llm_state: dict[str, str] = {"status": "idle", "text": "Press L for local-LLM help."}
+    # transient action feedback, shown in every mode (unlike the LLM box)
+    toast: dict[str, Any] = {"text": "", "ttl": 0.0, "ok": True}
+
+    def say(text: str, ok: bool = True) -> None:
+        toast["text"], toast["ttl"], toast["ok"] = text, 2.5, ok
 
     def deploy_loadout(refund_current: bool = False) -> None:
         """(Re)build turrets from loadout.py, costed against the budget.
@@ -89,24 +100,28 @@ def main() -> None:  # pragma: no cover - needs a display
                 world.bank.earn(gun_cost(t.gun))
             for gt in world.gates:
                 world.bank.earn(gt.cost)
+            for lm in world.limiters:
+                world.bank.earn(lm.cost)
         editor = ArsenalEditor(world.unlocked(), bank=world.bank)
         dropped = editor.seed_purchase(
             loadout_mod.build_loadout(world.unlocked(), world.map.slots)
         )
-        # gates are optional in a saved loadout (older files have no build_gates)
+        # gates / limiters are optional in a saved loadout (older files lack them)
         build_gates = getattr(loadout_mod, "build_gates", None)
         if build_gates is not None:
             editor.seed_purchase_gates(build_gates(world.unlocked(), world.map.slots))
+        build_limiters = getattr(loadout_mod, "build_limiters", None)
+        if build_limiters is not None:
+            editor.seed_purchase_limiters(build_limiters(world.unlocked(), world.map.slots))
         sync_world()
         if dropped:
-            llm_state["text"] = (
-                f"Over budget: {len(dropped)} loadout turret(s) not deployed."
-            )
+            say(f"Over budget: {len(dropped)} loadout turret(s) not deployed.", ok=False)
 
     def sync_world() -> None:
-        """Push the editor's turrets + gates to the world and re-derive routing."""
+        """Push the editor's turrets, gates, and limiters to the world; re-route."""
         world.set_turrets(editor.to_turrets())
         world.set_gates(editor.to_gates())
+        world.set_limiters(editor.to_limiters())
         world.autoroute()
 
     def switch_map(delta: int) -> None:
@@ -170,28 +185,33 @@ def main() -> None:  # pragma: no cover - needs a display
                 elif ev.key == pygame.K_F5:
                     importlib.reload(loadout_mod)
                     deploy_loadout(refund_current=True)
-                    llm_state["text"] = "Loadout reloaded."
+                    say("Loadout reloaded from loadout.py")
                 elif ev.key == pygame.K_e:
                     edit_mode = not edit_mode
                 elif ev.key == pygame.K_m:
                     metrics_mode = not metrics_mode
+                elif ev.key == pygame.K_h:
+                    help_mode = not help_mode
                 elif ev.key == pygame.K_s:
                     # save the current build to loadout.py so it loads next launch
                     try:
                         with open(loadout_mod.__file__, "w", encoding="utf-8") as fh:
                             fh.write(editor.to_python())
-                        llm_state["text"] = f"Saved loadout to {loadout_mod.__file__}"
+                        say("Saved build to loadout.py")
                     except OSError as err:
-                        llm_state["text"] = f"Save failed: {err}"
+                        say(f"Save failed: {err}", ok=False)
                 elif ev.key == pygame.K_d:
                     difficulty_i = (difficulty_i + 1) % len(DIFFICULTY_LIST)
                     world.difficulty = DIFFICULTY_LIST[difficulty_i]
                     world.reset()
                     deploy_loadout()
+                    say(f"difficulty: {world.difficulty} (run reset)")
                 elif ev.key == pygame.K_l:
                     ask_llm()
                 elif edit_mode and ev.key == pygame.K_g:
                     editor.select_gate()  # gate-placement mode
+                elif edit_mode and ev.key == pygame.K_b:
+                    editor.select_limiter()  # quelimiter (buffer) placement mode
                 elif edit_mode and pygame.K_1 <= ev.key <= pygame.K_9:
                     guns = editor.available_guns()
                     idx = ev.key - pygame.K_1
@@ -201,7 +221,9 @@ def main() -> None:  # pragma: no cover - needs a display
                 mx, my = ev.pos
                 if mx < GW:  # click on the playfield -> place / equip / remove
                     if ev.button == 1:
-                        if editor.placing_gate:
+                        if editor.placing_limiter:
+                            editor.place_limiter(mx, my)
+                        elif editor.placing_gate:
                             editor.place_gate(mx, my)
                         else:
                             hit = editor.turret_at(mx, my)
@@ -211,8 +233,9 @@ def main() -> None:  # pragma: no cover - needs a display
                             else:
                                 editor.place(mx, my)
                         sync_world()
-                    elif ev.button == 3:  # remove a turret, or a gate if none there
-                        if editor.remove_at(mx, my) or editor.remove_gate_at(mx, my):
+                    elif ev.button == 3:  # remove a turret, gate, or limiter under the cursor
+                        if (editor.remove_at(mx, my) or editor.remove_gate_at(mx, my)
+                                or editor.remove_limiter_at(mx, my)):
                             sync_world()
                 elif ev.button == 1:  # click on the panel -> palette selection
                     for rect, kind, name in palette_hits:
@@ -221,9 +244,27 @@ def main() -> None:  # pragma: no cover - needs a display
                                 editor.select_gun(name)
                             elif kind == "gate":
                                 editor.select_gate()
+                            elif kind == "limiter":
+                                editor.select_limiter()
                             else:
                                 editor.toggle_module(name)
+                            # placeable items can also be dragged onto the map
+                            if kind in ("gun", "gate", "limiter"):
+                                drag_item = (kind, name)
                             break
+            elif ev.type == pygame.MOUSEBUTTONUP and ev.button == 1 and edit_mode:
+                if drag_item is not None:
+                    mx, my = ev.pos
+                    kind, _ = drag_item
+                    if mx < GW:  # dropped on the playfield -> place there
+                        if kind == "gun":
+                            editor.place(mx, my)
+                        elif kind == "gate":
+                            editor.place_gate(mx, my)
+                        elif kind == "limiter":
+                            editor.place_limiter(mx, my)
+                        sync_world()
+                    drag_item = None
 
         # keep the editor palette in step with what the current wave has unlocked
         editor.set_unlocked(world.unlocked())
@@ -243,20 +284,30 @@ def main() -> None:  # pragma: no cover - needs a display
         # ---- topology: edges, then nodes with their queues ----
         for src, dst in world.map.edges():
             pygame.draw.line(screen, (42, 66, 89), world.map.pos(src), world.map.pos(dst), 12)
+        worst_node, worst_depth = None, 0  # the live bottleneck this frame
         for nid, node in world.map.nodes.items():
             q = world.queue_at(nid)
+            depth = len(q)
             nx, ny = int(node.x), int(node.y)
             if nid == world.map.sink:
                 pygame.draw.rect(screen, DANGER, (nx - 8, ny - 20, 7, 40))
-            depth_c = DANGER if len(q) > QUEUE_WARN else MUTED
-            pygame.draw.circle(screen, depth_c, (nx, ny), 5)
-            if q:
-                text(str(len(q)), nx + 7, ny - 7, F_S, depth_c)
+            # live load heat: green when clear, amber as it fills, red near overflow
+            frac = depth / QUEUE_CAP
+            load_c = PHOS if frac < 0.34 else (AMBER if frac < 0.67 else DANGER)
+            pygame.draw.circle(screen, load_c, (nx, ny), 5 + min(depth, QUEUE_CAP))
+            if depth:
+                text(str(depth), nx + 9, ny - 7, F_S, load_c)
+            if depth > worst_depth:
+                worst_node, worst_depth = (nx, ny), depth
             # queued packets stacked beside the node (size shrinks as volume drains)
             for j, p in enumerate(q):
                 r = max(3, int(6 * p.volume / p.maxvol))
                 pygame.draw.circle(screen, KINDS[p.kind]["color"],
-                                   (nx + 12 + (j % 4) * 8, ny - 12 + (j // 4) * 8), r)
+                                   (nx + 14 + (j % 4) * 8, ny - 14 + (j // 4) * 8), r)
+        # call out the current bottleneck once it's genuinely backing up
+        if worst_node is not None and worst_depth > QUEUE_WARN:
+            pygame.draw.circle(screen, DANGER, worst_node, 22, 2)
+            text("BOTTLENECK", worst_node[0] - 34, worst_node[1] + 24, F_S, DANGER)
 
         hovered_turret = None
         for t in world.turrets:
@@ -286,8 +337,24 @@ def main() -> None:  # pragma: no cover - needs a display
                 for ci, k in enumerate(routed):
                     pygame.draw.rect(screen, KINDS[k]["color"], (tx - 6 + ci * 6, ty - 2, 5, 5))
 
+        # limiters: a valve marker at the node, with its buffered count
+        for lm in world.limiters:
+            if lm.node not in world.map.nodes:
+                continue
+            lx, ly = (int(v) for v in world.map.pos(lm.node))
+            pygame.draw.rect(screen, BG, (lx - 9, ly - 9, 18, 18))
+            pygame.draw.rect(screen, AMBER, (lx - 9, ly - 9, 18, 18), 2)
+            pygame.draw.line(screen, AMBER, (lx, ly - 9), (lx, ly + 9), 2)
+            text(lm.id, lx - 8, ly - 30, F_S, AMBER)
+
         # placement preview: highlight what a click would bind to
-        if edit_mode and mouse[0] < GW and editor.placing_gate:
+        if edit_mode and mouse[0] < GW and editor.placing_limiter:
+            col = PHOS if world.bank.can_afford(editor.pending_cost()) else DANGER
+            nid = world.map.nearest_node(mouse[0], mouse[1])
+            fx, fy = (int(v) for v in world.map.pos(nid))
+            pygame.draw.line(screen, col, mouse, (fx, fy), 1)
+            pygame.draw.rect(screen, col, (fx - 10, fy - 10, 20, 20), 2)
+        elif edit_mode and mouse[0] < GW and editor.placing_gate:
             col = PHOS if world.bank.can_afford(editor.pending_cost()) else DANGER
             fork = world.map.nearest_branch_node(mouse[0], mouse[1])
             if fork is not None:
@@ -318,7 +385,11 @@ def main() -> None:  # pragma: no cover - needs a display
         if world.intermission > 0 and not world.over:
             text(f"Wave {world.level} incoming...", GW // 2 - 70, 14, F_M, INK)
         text(f"map: {world.map.name}   [ ] to switch", 12, WIN_H - 22, F_S, MUTED)
-        text(f"mode: {world.difficulty}   D to cycle", 12, WIN_H - 40, F_S, MUTED)
+        text(f"mode: {world.difficulty}   D to cycle   ·   H for help", 12, WIN_H - 40, F_S, MUTED)
+        # transient action feedback (save/reload/over-budget/difficulty), always visible
+        if toast["ttl"] > 0:
+            toast["ttl"] -= dt
+            text(toast["text"], 12, WIN_H - 60, F_S, PHOS if toast["ok"] else DANGER)
 
         # ---- panel ----
         text("CHOKEPOINT", PANEL_X, 16, F_M, PHOS)
@@ -360,45 +431,55 @@ def main() -> None:  # pragma: no cover - needs a display
         if edit_mode:
             text("EDIT MODE — E to exit", PANEL_X, row, F_S, PHOS)
             row += 18
-            text("LMB place · LMB on turret = equip · RMB remove", PANEL_X, row, F_S, MUTED)
+            text("click+place / drag to map · LMB turret=equip · RMB remove",
+                 PANEL_X, row, F_S, MUTED)
             row += 20
-            text("GUNS  (click or 1-9)", PANEL_X, row, F_S, MUTED)
+            text("GUNS  (click/drag or 1-9; swatches = kinds)", PANEL_X, row, F_S, MUTED)
             row += 17
             for i, name in enumerate(editor.available_guns()):
                 g = make_gun(name)
                 sel = name == editor.selected_gun
                 color = PHOS if sel else (INK if world.bank.can_afford(g.cost) else MUTED)
                 palette_hits.append((pygame.Rect(PANEL_X, row - 1, panel_w, 17), "gun", name))
-                text(f"{i + 1} {name:<8}{g.cost:>4}cr  {','.join(sorted(g.accepts))}",
-                     PANEL_X + 2, row, F_S, color)
+                text(f"{i + 1} {name:<9}{g.cost:>4}cr", PANEL_X + 2, row, F_S, color)
+                for si, k in enumerate(sorted(g.accepts)):  # accepted kinds as swatches
+                    pygame.draw.rect(screen, KINDS[k]["color"],
+                                     (PANEL_X + 150 + si * 9, row + 2, 7, 7))
                 row += 17
             row += 6
             text("MODULES  (click to queue)", PANEL_X, row, F_S, MUTED)
             row += 17
-            for name in editor.available_modules():
+            mods = editor.available_modules()
+            col_w = panel_w // 2
+            for i, name in enumerate(mods):  # two columns to save vertical space
                 mod = MODULE_LIBRARY[name]
                 queued = name in editor.pending_modules
                 color = PHOS if queued else (INK if world.bank.can_afford(mod.cost) else MUTED)
-                palette_hits.append((pygame.Rect(PANEL_X, row - 1, panel_w, 17), "mod", name))
-                text(f"[{'x' if queued else ' '}] {name:<15}{mod.cost:>3}cr",
-                     PANEL_X + 2, row, F_S, color)
-                row += 17
-            row += 6
-            text("ROUTERS  (click or G)", PANEL_X, row, F_S, MUTED)
+                cellx = PANEL_X + (i % 2) * col_w
+                celly = row + (i // 2) * 17
+                palette_hits.append((pygame.Rect(cellx, celly - 1, col_w, 17), "mod", name))
+                text(f"[{'x' if queued else ' '}] {name} {mod.cost}", cellx + 2, celly, F_S, color)
+            row += ((len(mods) + 1) // 2) * 17 + 6
+            text("FLOW DEVICES  (click, G gate / B limiter)", PANEL_X, row, F_S, MUTED)
             row += 17
             gcolor = GATE_C if editor.placing_gate else (
                 INK if world.bank.can_afford(DEFAULT_GATE_COST) else MUTED)
             palette_hits.append((pygame.Rect(PANEL_X, row - 1, panel_w, 17), "gate", "gate"))
-            text(f"gate {DEFAULT_GATE_COST:>4}cr  (routes kinds at a fork)",
+            text(f"gate    {DEFAULT_GATE_COST:>4}cr  routes kinds at a fork",
                  PANEL_X + 2, row, F_S, gcolor)
+            row += 17
+            lcolor = GATE_C if editor.placing_limiter else (
+                INK if world.bank.can_afford(DEFAULT_LIMITER_COST) else MUTED)
+            palette_hits.append((pygame.Rect(PANEL_X, row - 1, panel_w, 17), "limiter", "limiter"))
+            text(f"limiter {DEFAULT_LIMITER_COST:>4}cr  buffers + smooths a burst",
+                 PANEL_X + 2, row, F_S, lcolor)
             row += 21
-            if editor.placing_gate:
-                color = PHOS if world.bank.can_afford(DEFAULT_GATE_COST) else DANGER
-                text(f"to place: gate  {DEFAULT_GATE_COST}cr", PANEL_X, row, F_S, color)
-            elif editor.selected_gun is not None:
+            placing = ("limiter" if editor.placing_limiter else
+                       "gate" if editor.placing_gate else editor.selected_gun)
+            if placing is not None:
                 sc = editor.pending_cost()
                 color = PHOS if world.bank.can_afford(sc) else DANGER
-                text(f"to place: {editor.selected_gun}  {sc}cr", PANEL_X, row, F_S, color)
+                text(f"to place: {placing}  {sc}cr", PANEL_X, row, F_S, color)
         else:
             # LLM helper area
             pygame.draw.rect(screen, PANEL, (PANEL_X, row, panel_w, 150), border_radius=6)
@@ -429,6 +510,48 @@ def main() -> None:  # pragma: no cover - needs a display
             pygame.draw.rect(screen, PHOS, (bx, by, w, h), 1, border_radius=5)
             for i, ln in enumerate(lines):
                 text(ln, bx + 8, by + 6 + i * 16, F_S, INK if i else PHOS)
+
+        # ---- help overlay (toggle H): controls + kind/gun legend ----
+        if help_mode and not world.over:
+            ov = pygame.Surface((GW, WIN_H), pygame.SRCALPHA)
+            ov.fill((8, 14, 22, 235))
+            screen.blit(ov, (0, 0))
+            text("HELP — H to close", 24, 20, F_M, PHOS)
+            controls = [
+                ("[ ]", "previous / next map"), ("E", "placement editor"),
+                ("G", "gate router (in editor)"), ("B", "quelimiter (in editor)"),
+                ("M", "metrics dashboard"),
+                ("S", "save build to loadout.py"), ("D", "cycle difficulty"),
+                ("P", "pause"), ("R", "reset"), ("F5", "reload loadout.py"),
+                ("L", "local-LLM help"),
+            ]
+            text("CONTROLS", 24, 52, F_S, MUTED)
+            yy = 70
+            for key, desc in controls:
+                text(f"{key:<4}", 28, yy, F_S, PHOS)
+                text(desc, 70, yy, F_S, INK)
+                yy += 17
+            text("In the editor: LMB place · LMB+modules on a turret = equip · "
+                 "RMB remove · gates snap to a fork", 24, yy + 2, F_S, MUTED)
+
+            yy += 30
+            text("ALERT KINDS", 24, yy, F_S, MUTED)
+            yy += 18
+            for k in KINDS:
+                pygame.draw.rect(screen, KINDS[k]["color"], (28, yy + 2, 9, 9))
+                text(f"{k:<11}{KINDS[k]['desc']}", 44, yy, F_S, INK)
+                yy += 17
+
+            yy += 14
+            text("GUNS  (name  cost  accepts)", 24, yy, F_S, MUTED)
+            yy += 18
+            for name in GUN_LIBRARY:
+                gun = make_gun(name)
+                text(f"{name:<11}{gun.cost:>4}cr  {','.join(sorted(gun.accepts))}",
+                     28, yy, F_S, INK)
+                yy += 17
+            text("Lose by drops (leaks) OR latency (queues age out your health). "
+                 "Cover every kind, with throughput.", 24, yy + 6, F_S, MUTED)
 
         # ---- metrics dashboard (toggle M): visualize the collected telemetry ----
         if metrics_mode and not world.over:

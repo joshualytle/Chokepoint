@@ -57,18 +57,18 @@ def test_covered_kind_gets_handled():
 
 
 def test_uncovered_kind_leaks_at_the_sink():
-    # only a sieve (auth/dns). Force the firewall+ids burst: firewall is uncovered,
-    # so every firewall packet flows untouched to the sink and leaks.
+    # only a sieve (auth/dns). Wave 3 of the curriculum is the ids stage; ids is
+    # uncovered here, so every ids packet flows untouched to the sink and leaks.
     w = make_world([Turret(200, 140, make_gun("sieve"))])
     w.wave_idx = 3
     w.load_wave(3)
     w.started = True
-    step_for(w, 40)
-    assert "firewall" in w.coverage_gaps()
-    fw = w.stats["firewall"]
-    assert fw.spawned > 0
-    assert fw.handled == 0
-    assert fw.leaked > 0
+    step_for(w, 60)
+    assert "ids" in w.coverage_gaps()
+    ids = w.stats["ids"]
+    assert ids.spawned > 0
+    assert ids.handled == 0
+    assert ids.leaked > 0
 
 
 def test_default_loadout_covers_early_kinds():

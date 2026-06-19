@@ -1,15 +1,18 @@
 # HANDOFF — Chokepoint
 
 Kickoff briefing for a Claude Code session. Open the repo and start with:
-**"Read HANDOFF.md and CLAUDE.md, verify the build with `make check`, then
-propose next steps."**
+**"Read HANDOFF.md and CLAUDE.md, verify the build, then propose next steps."**
 
 ## What this is
 
-A typed-alert tower-defense for learning Python. Packets are typed alerts that
-flood a map; turrets are typed consumers that only process the kinds their gun
-accepts. The puzzle is coverage + throughput — the same shape as routing a
-high-volume alert pipeline. Full rationale in `CLAUDE.md`; how to play in `SETUP.md`.
+Chokepoint (package `chokepoint`) is a typed-alert tower-defense for learning
+Python, shaped like a real alert pipeline. Packets are typed alerts that flow a
+**topology** and **queue at nodes**; turrets are typed consumers that drain the
+queue at the node they're bound to, processing only the kinds their gun accepts.
+**Gates** placed at forks route each kind down the branch whose consumers can
+handle it. You lose two ways: **drops** (uncovered kinds reach the exit, or a
+queue overflows) and **latency** (packets sit queued too long and bleed health).
+Full rationale in `CLAUDE.md`; how to play in `SETUP.md`.
 
 ## How I want to work (learning contract)
 
@@ -20,41 +23,54 @@ name the pipeline parallels, make small reviewable changes, don't over-engineer.
 ## Current state — VERIFIED
 
 - `python -m chokepoint` launches the game (desktop, pygame).
-- `make check` is green: **ruff clean, mypy clean, 15 tests passing.**
-- Pure logic (packets/arsenal/maps/simulation) has no pygame and is tested headless.
-- `loadout.py` is the player-edited file; `F5` hot-reloads it in-game.
+- Build is green: **ruff clean, mypy clean, 84 tests passing.**
+- Pure logic (packets/arsenal/economy/gates/maps/simulation/metrics/editor) has
+  no pygame and is tested headless; `render.py` is the thin pygame shell.
+- In-game editor (`E`) places turrets/gates against a credit budget; `S` saves
+  your build to `loadout.py`; `F5` hot-reloads it.
+- Telemetry (`metrics.py`) drives the metrics dashboard (`M`) and the failure
+  debrief; `H` shows an in-game help/legend overlay.
 - `llm_assist.py` gives optional local-LLM help; absent a model it degrades cleanly.
 
-Verify before changing anything:
+Verify before changing anything (Windows has no `make`; run the tools directly):
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-make install
-make check        # expect: ruff clean, mypy clean, 15 passed
-make run          # optional
+python -m venv .venv && . .venv/Scripts/activate     # or source .venv/bin/activate
+pip install -e ".[dev]"
+ruff check src tests && mypy src && pytest -q          # = make check elsewhere
+python -m chokepoint                                   # optional
 ```
 
 ## Guardrails — don't break these
 
-1. Pure modules stay free of pygame and never touch a display.
-2. Fire rate is static; modules never change it (there's a test).
-3. Behavior changes get tests.
-4. Guns/modules are drop-in via the registries.
-5. `llm_assist` stays optional, stdlib-only, localhost-only, never raises into the loop.
+1. Pure modules (everything but `render.py`) import no pygame and never touch a
+   display or the network. That's what keeps the logic testable.
+2. Fire rate is static; modules change damage/range/coverage, never `fire_rate`
+   (there's a test).
+3. Behavior changes get tests in `tests/`.
+4. Guns/modules/maps/gates are drop-in: add guns/modules via the registries
+   (`@register_gun` / `register_module`), maps via `build_graph`.
+5. `llm_assist` stays optional, stdlib-only, localhost-only, never raises into
+   the loop. File saves (S) and any future export follow the same "never raise
+   into the loop" rule.
 
 ## Backlog (rough priority)
 
-1. **In-game arsenal/placement editor.** Compose and place turrets via the UI
-   instead of editing `loadout.py`. *Acceptance:* place/equip/remove turrets in
-   game, existing loadout path still works, new tests, `make check` green.
-   *Teaches:* event handling, UI state, mapping clicks to object positions.
-2. **Adaptive waves.** Generate the next wave from which kinds leaked most.
-   *Acceptance:* difficulty visibly targets weak coverage; test asserts the link.
-3. **More content** (guns/modules/maps/kinds) via the registries.
-4. **Synergy + unlock UI polish.**
+Done: placement editor, economy/Bank, difficulty (incl. adaptive), topological
+sim (queues + dual failure), telemetry + metrics dashboard + failure debrief,
+loadout export, branching maps + gates (autoroute), content (email/quarantine),
+help overlay. Project renamed Packet Defense -> Chokepoint.
+
+1. **Tuning pass** — balance queue cap, dwell grace, drain rate, income, costs,
+   and the branching maps' difficulty. Needs playtesting with the `M` dashboard;
+   *whatever the player reports is the input here.*
+2. **Manual gate-routing override UI** — autoroute is the default; let the player
+   pin a kind to a branch. The pure `Gate.routes` already supports it.
+3. **More content** (guns/modules/kinds/maps) via the registries.
+4. **Cross-branch synergies / clearer unlock + synergy UI.**
 
 ## Suggested first prompt after verifying
 
-> "Let's do backlog item 1 — the in-game placement editor. Plan it first, point
-> out the Python concepts I'll meet, then build it in small steps with tests.
-> Keep the pure modules free of pygame."
+> "Read the latest commits to see what shipped, then let's tune the numbers —
+> walk me through what the metrics dashboard is telling us and propose changes
+> with tests."

@@ -37,6 +37,10 @@ economy.py     Bank — credit balance with can_afford/spend/earn. Pure. Shared 
 gates.py       Gate — a typed router placed at a fork; routes kinds to branch
                indices (the Lambda/EventBridge pre-filter). World.autoroute()
                derives routes from the turret layout (content-based routing).
+limiter.py     Limiter (quelimiter) — placed on a node; buffers a burst (large
+               cap) and releases unserved packets onward at a fixed rate
+               (token bucket). Smooths bursts; finite buffer, so sustained
+               overload still spills. Rate-limit vs. scale-concurrency.
 metrics.py     Telemetry — pure observability backend. World feeds it events +
                per-wave samples; aggregates KindFlow/NodeLoad/Latency(Histogram)/
                Trend/Efficiency. summarize_failure() -> incident post-mortem.

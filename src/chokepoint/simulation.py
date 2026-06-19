@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from .arsenal import Turret, compute_synergy_mult, unlocked_at
 from .economy import Bank
 from .gates import Gate
+from .limiter import Limiter
 from .maps import Graph
 from .metrics import Telemetry
 from .packets import DIFFICULTIES, KIND_LIST, WAVES, Packet
@@ -64,6 +65,7 @@ class World:
         self.map = game_map
         self.turrets: list[Turret] = []
         self.gates: list[Gate] = []
+        self.limiters: list[Limiter] = []
         self.difficulty = difficulty
         self.starting_credits = starting_credits
         # Created once and kept across resets; the editor holds this same object
@@ -90,6 +92,17 @@ class World:
 
     def gate_at(self, node_id: str) -> Gate | None:
         return next((g for g in self.gates if g.node == node_id), None)
+
+    def set_limiters(self, limiters: list[Limiter]) -> None:
+        """Place quelimiters and bind each to its nearest node."""
+        self.limiters = limiters
+        for i, lim in enumerate(limiters):
+            lim.id = f"L{i + 1}"
+            lim.node = self.map.nearest_node(lim.x, lim.y)
+            lim.tokens = 0.0
+
+    def limiter_at(self, node_id: str) -> Limiter | None:
+        return next((lim for lim in self.limiters if lim.node == node_id), None)
 
     def autoroute(self) -> None:
         """Content-based routing: point each gate's kinds at the first branch
@@ -137,6 +150,8 @@ class World:
         self.stats: dict[str, KindStat] = {k: KindStat() for k in KIND_LIST}
         for t in self.turrets:
             t.cd = 0.0
+        for lim in self.limiters:
+            lim.tokens = 0.0
         self.bank.balance = self.starting_credits  # refill in place; keep the reference
         self.telemetry = Telemetry()  # fresh per run; render reads it for charts/debrief
         self.load_wave(0)
@@ -190,6 +205,7 @@ class World:
         self._transit(dt)
         self._process(dt)
         self._route_and_dwell(dt)
+        self._release_limiters(dt)
         self._overflow()
         self._drain_health(dt)
         self.packets = [p for p in self.packets if not p.dead]
@@ -243,31 +259,55 @@ class World:
                     self.stats[target.kind].handled += 1
                     self.telemetry.on_handle(target.kind, t.node, self.wave_idx, target.wait)
 
+    def _dispatch(self, p: Packet) -> None:
+        """Send a queued packet onward (gate-routed at a fork); leak it at the sink."""
+        outs = self.map.branches(p.at)
+        if not outs:                              # unserved at the sink -> a drop
+            self._leak(p, "sink")
+            return
+        if len(outs) == 1:
+            idx = 0                               # linear node: only one way on
+        else:                                     # fork: a gate routes by kind
+            gate = self.gate_at(p.at)
+            idx = gate.branch_for(p.kind, len(outs)) if gate is not None else 0
+        p.moving_to, p.seg_pos = outs[idx], 0.0
+
     def _route_and_dwell(self, dt: float) -> None:
-        """Queued packets either wait for local service (accruing dwell) or, if no
-        turret here accepts them, get routed onward — leaking if that's the sink."""
+        """Queued packets either wait for local service (accruing dwell), sit
+        buffered in a limiter (metered out separately, no dwell), or route onward."""
         for p in self.packets:
             if p.dead or p.moving_to is not None:
                 continue
             if self.serves(p.at, p.kind):
                 p.wait += dt                      # waiting for service -> latency
+            elif self.limiter_at(p.at) is not None:
+                continue                          # buffered; released by _release_limiters
+            else:
+                self._dispatch(p)
+
+    def _release_limiters(self, dt: float) -> None:
+        """Each limiter releases buffered (unserved) packets onward at its rate."""
+        for lim in self.limiters:
+            if not lim.node:
                 continue
-            outs = self.map.branches(p.at)
-            if not outs:                          # unserved at the sink -> a drop
-                self._leak(p, "sink")
-                continue
-            if len(outs) == 1:
-                idx = 0                           # linear node: only one way on
-            else:                                 # fork: a gate routes by kind
-                gate = self.gate_at(p.at)
-                idx = gate.branch_for(p.kind, len(outs)) if gate is not None else 0
-            p.moving_to, p.seg_pos = outs[idx], 0.0
+            lim.refill(dt)
+            buffered = [p for p in self.queue_at(lim.node) if not self.serves(lim.node, p.kind)]
+            i = 0
+            while lim.tokens >= 1.0 and i < len(buffered):
+                self._dispatch(buffered[i])
+                lim.tokens -= 1.0
+                i += 1
 
     def _overflow(self) -> None:
-        """A node holding more than QUEUE_CAP packets drops the excess (oldest)."""
+        """A node holding more than its capacity drops the excess (oldest first).
+
+        A quelimiter raises the node's capacity to its buffer size — that's how it
+        absorbs a burst without dropping, where a bare node would overflow."""
         for node_id in self.map.nodes:
+            lim = self.limiter_at(node_id)
+            cap = lim.buffer_cap if lim is not None else QUEUE_CAP
             q = self.queue_at(node_id)
-            for p in q[:-QUEUE_CAP] if len(q) > QUEUE_CAP else []:
+            for p in q[:-cap] if len(q) > cap else []:
                 self._leak(p, "overflow")
 
     def _drain_health(self, dt: float) -> None:

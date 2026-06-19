@@ -100,3 +100,18 @@ def test_autoroute_on_delta_splits_kinds_across_lanes():
     routes = w.gates[0].routes
     assert routes["auth"] != routes["cloudtrail"]  # different lanes
     assert routes["dns"] == routes["auth"]         # same consumer, same lane
+
+
+def test_trident_is_a_three_way_fork_routed_to_distinct_lanes():
+    from chokepoint.maps import MAPS
+    gm = MAPS["trident"]
+    assert len(gm.branches("n1")) == 3
+    w = World(gm)
+    # a different consumer on each of the three lanes
+    w.set_turrets([Turret(340, 120, make_gun("sieve")),       # top -> auth
+                   Turret(340, 340, make_gun("auditor")),     # middle -> cloudtrail
+                   Turret(340, 560, make_gun("quarantine"))])  # bottom -> email
+    w.set_gates([Gate(170, 340)])
+    w.autoroute()
+    routes = w.gates[0].routes
+    assert len({routes["auth"], routes["cloudtrail"], routes["email"]}) == 3

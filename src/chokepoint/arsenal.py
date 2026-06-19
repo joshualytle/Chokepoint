@@ -57,6 +57,8 @@ register_module(Module("dedup", "Deduplicator: collapses repeats, +6 effective p
                        unlock_wave=3, damage_bonus=6, cost=70))
 register_module(Module("adapter_endpoint", "Lets a gun also accept endpoint detections.",
                        unlock_wave=4, add_accepts=frozenset({"endpoint"}), cost=80))
+register_module(Module("adapter_email", "Lets a gun also accept email-security alerts.",
+                       unlock_wave=3, add_accepts=frozenset({"email"}), cost=60))
 
 
 # --------------------------------------------------------------------------- #
@@ -144,6 +146,13 @@ def lance() -> Gun:
                accepts=frozenset({"endpoint"}), unlock_wave=4, cost=240)
 
 
+@register_gun("quarantine")
+def quarantine() -> Gun:
+    return Gun("quarantine", "Inbox filter for email-security and phishing alerts.",
+               fire_rate=2.5, damage=8, base_range=150,
+               accepts=frozenset({"email"}), unlock_wave=2, cost=130)
+
+
 def make_gun(name: str) -> Gun:
     """Build a fresh gun instance from the library by name."""
     if name not in GUN_LIBRARY:
@@ -199,6 +208,8 @@ SYNERGIES: list[Synergy] = [
             "Auth + cloud audit cross-checks. +25% throughput to both.", 1.25),
     Synergy(frozenset({"scatter", "lance"}), "Layered defense",
             "Broad + heavy coverage. +20% throughput to both.", 1.20),
+    Synergy(frozenset({"quarantine", "sieve"}), "Inbox correlation",
+            "Phishing + auth cross-check. +20% throughput to both.", 1.20),
 ]
 
 

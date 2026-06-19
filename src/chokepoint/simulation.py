@@ -104,6 +104,13 @@ class World:
     def limiter_at(self, node_id: str) -> Limiter | None:
         return next((lim for lim in self.limiters if lim.node == node_id), None)
 
+    def rebind(self) -> None:
+        """Re-snap all placed devices to the current nodes (after a topology edit)."""
+        self.set_turrets(self.turrets)
+        self.set_gates(self.gates)
+        self.set_limiters(self.limiters)
+        self.autoroute()
+
     def autoroute(self) -> None:
         """Content-based routing: point each gate's kinds at the first branch
         that reaches a turret accepting them. Recompute after turret/gate edits.

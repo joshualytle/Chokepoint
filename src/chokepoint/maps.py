@@ -80,6 +80,69 @@ class Graph:
         return min(self.nodes, key=lambda nid: (self.nodes[nid].x - x) ** 2
                    + (self.nodes[nid].y - y) ** 2)
 
+    # ---- player editing: grow the topology, kept acyclic ---- #
+    def reachable(self, a: str, b: str) -> bool:
+        """Is ``b`` reachable from ``a`` by following edges? (a == a is True.)"""
+        seen: set[str] = set()
+        stack = [a]
+        while stack:
+            n = stack.pop()
+            if n == b:
+                return True
+            if n in seen:
+                continue
+            seen.add(n)
+            stack.extend(self.adj.get(n, []))
+        return False
+
+    def _fresh_id(self) -> str:
+        k = 0
+        while f"n{k}" in self.nodes:
+            k += 1
+        return f"n{k}"
+
+    def add_node(self, x: float, y: float) -> str:
+        """Add a node at (x, y) and return its id."""
+        nid = self._fresh_id()
+        self.nodes[nid] = Node(nid, x, y)
+        self.adj[nid] = []
+        return nid
+
+    def add_edge(self, src: str, dst: str) -> bool:
+        """Add a directed edge src->dst. Rejected if it self-loops, duplicates, or
+        would create a cycle (which would loop packets forever). True if added."""
+        if src == dst or src not in self.nodes or dst not in self.nodes:
+            return False
+        if dst in self.adj[src]:
+            return False
+        if self.reachable(dst, src):  # dst already reaches src -> this closes a loop
+            return False
+        self.adj[src].append(dst)
+        return True
+
+    def remove_edge(self, src: str, dst: str) -> bool:
+        if src in self.adj and dst in self.adj[src]:
+            self.adj[src].remove(dst)
+            return True
+        return False
+
+    def remove_node(self, nid: str) -> bool:
+        """Remove a node and all its edges. The source/sink can't be removed."""
+        if nid in (self.source, self.sink) or nid not in self.nodes:
+            return False
+        del self.nodes[nid]
+        self.adj.pop(nid, None)
+        for outs in self.adj.values():
+            if nid in outs:
+                outs.remove(nid)
+        return True
+
+    def copy(self) -> Graph:
+        """A deep-enough copy so editing a play session never mutates the base map."""
+        return Graph(self.name, dict(self.nodes),
+                     {k: list(v) for k, v in self.adj.items()},
+                     self.source, self.sink, list(self.slots))
+
 
 def build_graph(name: str, coords: dict[str, tuple[float, float]],
                 edges: list[tuple[str, str]], source: str, sink: str,

@@ -87,6 +87,7 @@ def main() -> None:  # pragma: no cover - needs a display
     code_mode = False            # in-app code editor for loadout.py
     code_buf = TextBuffer()
     code_status: dict[str, str] = {"msg": ""}
+    code_scroll = 0              # first visible line in the editor (mouse-wheel scroll)
     # palette rows registered each frame so panel clicks can be mapped to actions:
     # (rect, "gun"|"mod", name)
     palette_hits: list[tuple[Any, str, str]] = []
@@ -298,6 +299,7 @@ def main() -> None:  # pragma: no cover - needs a display
                     except OSError as err:
                         code_buf.set_text(f"# could not read loadout.py: {err}\n")
                     code_status["msg"] = ""
+                    code_scroll = 0
                     code_mode = True
                 elif ev.key == pygame.K_s:
                     # save the current build to loadout.py so it loads next launch
@@ -324,13 +326,12 @@ def main() -> None:  # pragma: no cover - needs a display
                     idx = ev.key - pygame.K_1
                     if idx < len(guns):
                         editor.select_gun(guns[idx])
+            elif ev.type == pygame.MOUSEWHEEL and code_mode:
+                code_scroll = max(0, code_scroll - ev.y * 3)  # scroll the code view
             elif ev.type == pygame.MOUSEBUTTONDOWN and code_mode and ev.button == 1:
                 mx, my = ev.pos  # click to position the caret in the editor
-                line_h, top, left = 16, 56, 52
-                avail = (WIN_H - top - 16) // line_h
-                first = max(0, min(code_buf.row - avail // 2,
-                                   max(0, len(code_buf.lines) - avail)))
-                r = first + (my - top) // line_h
+                top, left = 56, 52
+                r = code_scroll + (my - top) // 16
                 if my >= top and 0 <= r < len(code_buf.lines):
                     code_buf.row = r
                     ln = code_buf.lines[r]
@@ -794,14 +795,20 @@ def main() -> None:  # pragma: no cover - needs a display
             ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
             ov.fill((6, 10, 16, 246))
             screen.blit(ov, (0, 0))
-            text("CODE — loadout.py   Ctrl+S apply · Ctrl+Z undo · click to move · Esc close",
+            text("CODE — loadout.py   Ctrl+S apply · Ctrl+Z undo · click/scroll · Esc close",
                  16, 12, F_S, PHOS)
             if code_status["msg"]:
                 ok = not code_status["msg"].startswith("error")
                 text(code_status["msg"], 16, 34, F_S, PHOS if ok else DANGER)
             line_h, top = 16, 56
             avail = (WIN_H - top - 16) // line_h
-            first = max(0, min(code_buf.row - avail // 2, max(0, len(code_buf.lines) - avail)))
+            # mouse-wheel scroll, but always keep the caret line in view
+            if code_buf.row < code_scroll:
+                code_scroll = code_buf.row
+            elif code_buf.row >= code_scroll + avail:
+                code_scroll = code_buf.row - avail + 1
+            code_scroll = max(0, min(code_scroll, max(0, len(code_buf.lines) - avail)))
+            first = code_scroll
             syntax_c = {"kw": (130, 170, 255), "num": AMBER, "comment": MUTED}
             for i in range(first, min(len(code_buf.lines), first + avail)):
                 y = top + (i - first) * line_h

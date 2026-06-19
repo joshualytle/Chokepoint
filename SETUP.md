@@ -25,6 +25,7 @@ Requires Python 3.11+ and pygame 2.6+.
 | `R`      | reset the run                            |
 | `P`      | pause / resume                           |
 | `E`      | toggle the in-game placement editor      |
+| `T`      | toggle build mode (design the topology)  |
 | `M`      | toggle the metrics dashboard             |
 | `S`      | save your build to `loadout.py`          |
 | `D`      | cycle difficulty (easy/adaptive/overkill)|
@@ -57,6 +58,15 @@ build*, and the editor spends from the same credits for changes.
 Press `S` to **save** your in-game build back to `loadout.py` — it generates the
 Python for you. Relaunch (or press `F5`) and you pick up right where you left
 off. That's the export: your work is just a `.py` file you own.
+
+## Build your own topology (press `T`)
+
+Press `T` for build mode and shape the pipeline itself: **click empty space** to
+add a node, **click one node then another** to draw an edge between them, and
+**right-click a node** to remove it. Edges must flow forward — an edge that would
+create a loop is rejected (packets would circle forever). The source and sink
+can't be removed. Then drop turrets, gates, and limiters onto the layout you
+designed. (Topology edits aren't saved by `S` yet — that's coming.)
 
 ## Credits — design under a budget
 

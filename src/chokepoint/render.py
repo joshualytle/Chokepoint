@@ -7,6 +7,7 @@ Controls:
   [ / ]   previous / next map        R   reset
   P       pause / resume             F5  reload your loadout.py
   E       toggle the placement editor (buy/place/equip/remove turrets)
+  T       toggle build mode (design the topology: add nodes/edges)
   M       toggle the metrics dashboard (queues, by-kind, health trend)
   H       toggle the help overlay (controls + kind/gun legend)
   S       save the current build to loadout.py (resume it next launch / F5)
@@ -71,12 +72,15 @@ def main() -> None:  # pragma: no cover - needs a display
 
     map_i = 0
     difficulty_i = 0
-    world = World(MAPS[MAP_LIST[map_i]], difficulty=DIFFICULTY_LIST[difficulty_i])
+    world = World(MAPS[MAP_LIST[map_i]].copy(), difficulty=DIFFICULTY_LIST[difficulty_i])
     editor = ArsenalEditor(world.unlocked(), bank=world.bank)
     edit_mode = False
     metrics_mode = False
     help_mode = False
     drag_item: tuple[str, str] | None = None  # (kind, name) being dragged from the palette
+    build_mode = False           # topology editing: add/remove nodes and edges
+    edge_src: str | None = None  # first node picked while drawing an edge
+    NODE_PICK = 16               # click within this many px counts as clicking a node
     # palette rows registered each frame so panel clicks can be mapped to actions:
     # (rect, "gun"|"mod", name)
     palette_hits: list[tuple[Any, str, str]] = []
@@ -124,10 +128,24 @@ def main() -> None:  # pragma: no cover - needs a display
         world.set_limiters(editor.to_limiters())
         world.autoroute()
 
+    def node_under(mx: int, my: int) -> str | None:
+        """The node id under a click (within NODE_PICK px), or None for empty space."""
+        if not world.map.nodes:
+            return None
+        nid = world.map.nearest_node(mx, my)
+        nx, ny = world.map.pos(nid)
+        return nid if (nx - mx) ** 2 + (ny - my) ** 2 <= NODE_PICK * NODE_PICK else None
+
+    def topology_edited() -> None:
+        """After a structural change: drop in-flight packets (they may reference a
+        removed node) and re-snap devices."""
+        world.packets.clear()
+        world.rebind()
+
     def switch_map(delta: int) -> None:
         nonlocal map_i, world, edit_mode
         map_i = (map_i + delta) % len(MAP_LIST)
-        world = World(MAPS[MAP_LIST[map_i]], difficulty=DIFFICULTY_LIST[difficulty_i])
+        world = World(MAPS[MAP_LIST[map_i]].copy(), difficulty=DIFFICULTY_LIST[difficulty_i])
         edit_mode = False
         deploy_loadout()
 
@@ -188,6 +206,13 @@ def main() -> None:  # pragma: no cover - needs a display
                     say("Loadout reloaded from loadout.py")
                 elif ev.key == pygame.K_e:
                     edit_mode = not edit_mode
+                    if edit_mode:
+                        build_mode = False
+                elif ev.key == pygame.K_t:
+                    build_mode = not build_mode
+                    edge_src = None
+                    if build_mode:
+                        edit_mode = False
                 elif ev.key == pygame.K_m:
                     metrics_mode = not metrics_mode
                 elif ev.key == pygame.K_h:
@@ -265,6 +290,30 @@ def main() -> None:  # pragma: no cover - needs a display
                             editor.place_limiter(mx, my)
                         sync_world()
                     drag_item = None
+            elif ev.type == pygame.MOUSEBUTTONDOWN and build_mode and ev.pos[0] < GW:
+                mx, my = ev.pos
+                picked = node_under(mx, my)
+                if ev.button == 1:
+                    if picked is None:                # empty space -> new node
+                        world.map.add_node(mx, my)
+                        topology_edited()
+                        say("added node")
+                    elif edge_src is None:            # first node of an edge
+                        edge_src = picked
+                    else:                             # second node -> draw the edge
+                        if world.map.add_edge(edge_src, picked):
+                            topology_edited()
+                            say(f"edge {edge_src} → {picked}")
+                        else:
+                            say("edge rejected (would loop, or duplicate)", ok=False)
+                        edge_src = None
+                elif ev.button == 3:                  # remove a node
+                    if picked is not None and world.map.remove_node(picked):
+                        topology_edited()
+                        say(f"removed {picked}")
+                    else:
+                        say("can't remove (source/sink or empty space)", ok=False)
+                    edge_src = None
 
         # keep the editor palette in step with what the current wave has unlocked
         editor.set_unlocked(world.unlocked())
@@ -382,7 +431,22 @@ def main() -> None:  # pragma: no cover - needs a display
             pygame.draw.circle(screen, KINDS[p.kind]["color"],
                                (int(ax + (bx - ax) * f), int(ay + (by - ay) * f)), r)
 
-        if world.intermission > 0 and not world.over:
+        # build mode: ring every node, mark source/sink, draw the pending edge
+        if build_mode:
+            for nid in world.map.nodes:
+                nx, ny = (int(v) for v in world.map.pos(nid))
+                ring = GATE_C if nid in (world.map.source, world.map.sink) else PHOS
+                pygame.draw.circle(screen, ring, (nx, ny), 16, 1)
+            sx, sy = (int(v) for v in world.map.pos(world.map.source))
+            kx, ky = (int(v) for v in world.map.pos(world.map.sink))
+            text("src", sx - 9, sy + 18, F_S, GATE_C)
+            text("sink", kx - 12, ky + 18, F_S, GATE_C)
+            if edge_src is not None:
+                pygame.draw.line(screen, PHOS, world.map.pos(edge_src), mouse, 2)
+            text("BUILD MODE (T) — click empty = node · node→node = edge · RMB node = remove",
+                 12, 14, F_S, PHOS)
+
+        if world.intermission > 0 and not world.over and not build_mode:
             text(f"Wave {world.level} incoming...", GW // 2 - 70, 14, F_M, INK)
         text(f"map: {world.map.name}   [ ] to switch", 12, WIN_H - 22, F_S, MUTED)
         text(f"mode: {world.difficulty}   D to cycle   ·   H for help", 12, WIN_H - 40, F_S, MUTED)
@@ -520,7 +584,7 @@ def main() -> None:  # pragma: no cover - needs a display
             controls = [
                 ("[ ]", "previous / next map"), ("E", "placement editor"),
                 ("G", "gate router (in editor)"), ("B", "quelimiter (in editor)"),
-                ("M", "metrics dashboard"),
+                ("T", "build mode (edit topology)"), ("M", "metrics dashboard"),
                 ("S", "save build to loadout.py"), ("D", "cycle difficulty"),
                 ("P", "pause"), ("R", "reset"), ("F5", "reload loadout.py"),
                 ("L", "local-LLM help"),

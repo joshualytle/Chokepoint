@@ -8,6 +8,7 @@ Controls:
   P       pause / resume             F5  reload your loadout.py
   E       toggle the placement editor (buy/place/equip/remove turrets)
   T       toggle build mode (design the topology: add nodes/edges)
+  C       edit loadout.py in-app (Ctrl+S apply, Esc close)
   M       toggle the metrics dashboard (queues, by-kind, health trend)
   H       toggle the help overlay (controls + kind/gun legend)
   S       save the current build to loadout.py (resume it next launch / F5)
@@ -33,6 +34,7 @@ from typing import Any
 from . import llm_assist
 from . import loadout as loadout_mod
 from .arsenal import GUN_LIBRARY, MODULE_LIBRARY, gun_cost, make_gun
+from .codebuffer import TextBuffer
 from .editor import ArsenalEditor
 from .gates import DEFAULT_GATE_COST
 from .limiter import DEFAULT_LIMITER_COST
@@ -81,6 +83,9 @@ def main() -> None:  # pragma: no cover - needs a display
     build_mode = False           # topology editing: add/remove nodes and edges
     edge_src: str | None = None  # first node picked while drawing an edge
     NODE_PICK = 16               # click within this many px counts as clicking a node
+    code_mode = False            # in-app code editor for loadout.py
+    code_buf = TextBuffer()
+    code_status: dict[str, str] = {"msg": ""}
     # palette rows registered each frame so panel clicks can be mapped to actions:
     # (rect, "gun"|"mod", name)
     palette_hits: list[tuple[Any, str, str]] = []
@@ -142,6 +147,29 @@ def main() -> None:  # pragma: no cover - needs a display
         world.packets.clear()
         world.rebind()
 
+    def apply_code(src: str) -> None:
+        """Validate the edited loadout source, then write + reload + redeploy.
+
+        We compile and dry-run build_loadout first, so a syntax/author error is
+        reported in the editor and the on-disk loadout.py is never corrupted.
+        """
+        ns: dict = {}
+        try:
+            exec(compile(src, loadout_mod.__file__, "exec"), ns)  # noqa: S102 - intended in-app eval
+            if "build_loadout" not in ns:
+                raise ValueError("define build_loadout(unlocked, slots)")
+            ns["build_loadout"](world.unlocked(), world.map.slots)
+        except Exception as err:  # surface any author error; never crash the loop
+            code_status["msg"] = f"error: {err}"
+            say("code not applied — see editor", ok=False)
+            return
+        with open(loadout_mod.__file__, "w", encoding="utf-8") as fh:
+            fh.write(src)
+        importlib.reload(loadout_mod)
+        deploy_loadout(refund_current=True)
+        code_status["msg"] = "applied OK"
+        say("loadout applied from editor")
+
     def switch_map(delta: int) -> None:
         nonlocal map_i, world, edit_mode
         map_i = (map_i + delta) % len(MAP_LIST)
@@ -200,6 +228,34 @@ def main() -> None:  # pragma: no cover - needs a display
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
                 running = False
+            elif ev.type == pygame.KEYDOWN and code_mode:
+                # the code editor captures all typing while open
+                if ev.key == pygame.K_ESCAPE:
+                    code_mode = False
+                elif (ev.mod & pygame.KMOD_CTRL) and ev.key == pygame.K_s:
+                    apply_code(code_buf.text())
+                elif ev.key == pygame.K_RETURN:
+                    code_buf.newline()
+                elif ev.key == pygame.K_BACKSPACE:
+                    code_buf.backspace()
+                elif ev.key == pygame.K_DELETE:
+                    code_buf.delete()
+                elif ev.key == pygame.K_LEFT:
+                    code_buf.left()
+                elif ev.key == pygame.K_RIGHT:
+                    code_buf.right()
+                elif ev.key == pygame.K_UP:
+                    code_buf.up()
+                elif ev.key == pygame.K_DOWN:
+                    code_buf.down()
+                elif ev.key == pygame.K_HOME:
+                    code_buf.home()
+                elif ev.key == pygame.K_END:
+                    code_buf.end()
+                elif ev.key == pygame.K_TAB:
+                    code_buf.insert("    ")
+                elif ev.unicode and ev.unicode.isprintable():
+                    code_buf.insert(ev.unicode)
             elif ev.type == pygame.KEYDOWN:
                 if ev.key == pygame.K_LEFTBRACKET:
                     switch_map(-1)
@@ -227,6 +283,14 @@ def main() -> None:  # pragma: no cover - needs a display
                     metrics_mode = not metrics_mode
                 elif ev.key == pygame.K_h:
                     help_mode = not help_mode
+                elif ev.key == pygame.K_c:
+                    try:
+                        with open(loadout_mod.__file__, encoding="utf-8") as fh:
+                            code_buf.set_text(fh.read())
+                    except OSError as err:
+                        code_buf.set_text(f"# could not read loadout.py: {err}\n")
+                    code_status["msg"] = ""
+                    code_mode = True
                 elif ev.key == pygame.K_s:
                     # save the current build to loadout.py so it loads next launch
                     try:
@@ -252,7 +316,7 @@ def main() -> None:  # pragma: no cover - needs a display
                     idx = ev.key - pygame.K_1
                     if idx < len(guns):
                         editor.select_gun(guns[idx])
-            elif ev.type == pygame.MOUSEBUTTONDOWN and edit_mode:
+            elif ev.type == pygame.MOUSEBUTTONDOWN and edit_mode and not code_mode:
                 mx, my = ev.pos
                 if mx < GW:  # click on the playfield -> place / equip / remove
                     if ev.button == 1:
@@ -287,7 +351,7 @@ def main() -> None:  # pragma: no cover - needs a display
                             if kind in ("gun", "gate", "limiter"):
                                 drag_item = (kind, name)
                             break
-            elif ev.type == pygame.MOUSEBUTTONUP and ev.button == 1 and edit_mode:
+            elif ev.type == pygame.MOUSEBUTTONUP and ev.button == 1 and edit_mode and not code_mode:
                 if drag_item is not None:
                     mx, my = ev.pos
                     kind, _ = drag_item
@@ -300,7 +364,8 @@ def main() -> None:  # pragma: no cover - needs a display
                             editor.place_limiter(mx, my)
                         sync_world()
                     drag_item = None
-            elif ev.type == pygame.MOUSEBUTTONDOWN and build_mode and ev.pos[0] < GW:
+            elif (ev.type == pygame.MOUSEBUTTONDOWN and build_mode and not code_mode
+                  and ev.pos[0] < GW):
                 mx, my = ev.pos
                 picked = node_under(mx, my)
                 if ev.button == 1:
@@ -328,7 +393,7 @@ def main() -> None:  # pragma: no cover - needs a display
         # keep the editor palette in step with what the current wave has unlocked
         editor.set_unlocked(world.unlocked())
 
-        if not world.paused and not world.over:
+        if not world.paused and not world.over and not code_mode:
             acc = dt
             while acc > 0:
                 world.step(min(1 / 60, acc))
@@ -620,7 +685,8 @@ def main() -> None:  # pragma: no cover - needs a display
             controls = [
                 ("[ ]", "previous / next map"), ("E", "placement editor"),
                 ("G", "gate router (in editor)"), ("B", "quelimiter (in editor)"),
-                ("T", "build mode (edit topology)"), ("M", "metrics dashboard"),
+                ("T", "build mode (edit topology)"), ("C", "edit loadout.py in-app"),
+                ("M", "metrics dashboard"),
                 ("S", "save build to loadout.py"), ("D", "cycle difficulty"),
                 ("P", "pause"), ("R", "reset"), ("F5", "reload loadout.py"),
                 ("L", "local-LLM help"),
@@ -701,10 +767,30 @@ def main() -> None:  # pragma: no cover - needs a display
             eff = tel.efficiency(world)
             text(f"cost / handled: {eff['cost_per_handled']:.0f}cr", 24, yy + 52, F_S, INK)
 
-        if world.paused and not world.over:
+        # in-app code editor (toggle C): edit loadout.py, Ctrl+S to apply
+        if code_mode:
+            ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+            ov.fill((6, 10, 16, 246))
+            screen.blit(ov, (0, 0))
+            text("CODE — loadout.py     Ctrl+S apply  ·  Esc close", 16, 12, F_M, PHOS)
+            if code_status["msg"]:
+                ok = not code_status["msg"].startswith("error")
+                text(code_status["msg"], 16, 34, F_S, PHOS if ok else DANGER)
+            line_h, top = 16, 56
+            avail = (WIN_H - top - 16) // line_h
+            first = max(0, min(code_buf.row - avail // 2, max(0, len(code_buf.lines) - avail)))
+            for i in range(first, min(len(code_buf.lines), first + avail)):
+                y = top + (i - first) * line_h
+                text(f"{i + 1:>3}", 16, y, F_S, MUTED)
+                text(code_buf.lines[i], 52, y, F_S, INK)
+                if i == code_buf.row:  # caret
+                    cx = 52 + F_S.size(code_buf.lines[i][: code_buf.col])[0]
+                    pygame.draw.line(screen, PHOS, (cx, y), (cx, y + 14), 1)
+
+        if world.paused and not world.over and not code_mode:
             text("|| PAUSED — press P", GW // 2 - 70, 36, F_M, AMBER)
 
-        if world.over:
+        if world.over and not code_mode:
             ov = pygame.Surface((GW, WIN_H), pygame.SRCALPHA)
             ov.fill((8, 14, 22, 210))
             screen.blit(ov, (0, 0))

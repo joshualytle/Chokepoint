@@ -26,6 +26,7 @@ Requires Python 3.11+ and pygame 2.6+.
 | `P`      | pause / resume                           |
 | `E`      | toggle the in-game placement editor      |
 | `T`      | toggle build mode (design the topology)  |
+| `C`      | edit `loadout.py` in-app (Ctrl+S to apply)|
 | `M`      | toggle the metrics dashboard             |
 | `S`      | save your build to `loadout.py`          |
 | `D`      | cycle difficulty (easy/adaptive/overkill)|
@@ -121,6 +122,11 @@ def build_loadout(unlocked, slots):
         Turret(*slots[1], gun=make_gun("scatter")),   # accepts ids, firewall
     ]
 ```
+
+You can edit this file **inside the game**: press `C` for the in-app code
+editor, change `build_loadout`, and press `Ctrl+S` to apply (it validates first,
+so a typo is reported instead of breaking the file). `Esc` closes the editor.
+Or edit the file externally and press `F5`.
 
 A turret's position lives on the object (`Turret(x, y, gun=...)`). The map is a
 graph of **nodes** (junctions where packets queue) joined by edges; when a

@@ -76,6 +76,7 @@ def main() -> None:  # pragma: no cover - needs a display
     edit_mode = False
     metrics_mode = False
     help_mode = False
+    drag_item: tuple[str, str] | None = None  # (kind, name) being dragged from the palette
     # palette rows registered each frame so panel clicks can be mapped to actions:
     # (rect, "gun"|"mod", name)
     palette_hits: list[tuple[Any, str, str]] = []
@@ -247,7 +248,23 @@ def main() -> None:  # pragma: no cover - needs a display
                                 editor.select_limiter()
                             else:
                                 editor.toggle_module(name)
+                            # placeable items can also be dragged onto the map
+                            if kind in ("gun", "gate", "limiter"):
+                                drag_item = (kind, name)
                             break
+            elif ev.type == pygame.MOUSEBUTTONUP and ev.button == 1 and edit_mode:
+                if drag_item is not None:
+                    mx, my = ev.pos
+                    kind, _ = drag_item
+                    if mx < GW:  # dropped on the playfield -> place there
+                        if kind == "gun":
+                            editor.place(mx, my)
+                        elif kind == "gate":
+                            editor.place_gate(mx, my)
+                        elif kind == "limiter":
+                            editor.place_limiter(mx, my)
+                        sync_world()
+                    drag_item = None
 
         # keep the editor palette in step with what the current wave has unlocked
         editor.set_unlocked(world.unlocked())
@@ -414,7 +431,8 @@ def main() -> None:  # pragma: no cover - needs a display
         if edit_mode:
             text("EDIT MODE — E to exit", PANEL_X, row, F_S, PHOS)
             row += 18
-            text("LMB place · LMB on turret = equip · RMB remove", PANEL_X, row, F_S, MUTED)
+            text("click+place / drag to map · LMB turret=equip · RMB remove",
+                 PANEL_X, row, F_S, MUTED)
             row += 20
             text("GUNS  (click or 1-9)", PANEL_X, row, F_S, MUTED)
             row += 17

@@ -210,5 +210,20 @@ MAPS: dict[str, Graph] = {
         source="n0", sink="n9",
         slots=[(340, 120), (340, 340), (340, 560)],
     ),
+    # Two forks in series: split early, then the lower lane splits again.
+    "cascade": build_graph(
+        "cascade",
+        {"n0": (-30, 300), "n1": (150, 300),
+         "n2": (320, 150), "n3": (560, 150),           # top lane
+         "n4": (320, 460), "n5": (470, 460),           # mid junction -> splits again
+         "n6": (600, 360), "n7": (600, 560),           # lower sub-lanes
+         "n8": (680, 300), "n9": (760, 300)},
+        edges=[("n0", "n1"), ("n1", "n2"), ("n1", "n4"),
+               ("n2", "n3"), ("n3", "n8"),
+               ("n4", "n5"), ("n5", "n6"), ("n5", "n7"),
+               ("n6", "n8"), ("n7", "n8"), ("n8", "n9")],
+        source="n0", sink="n9",
+        slots=[(320, 150), (600, 360), (600, 560)],
+    ),
 }
 MAP_LIST: list[str] = list(MAPS)

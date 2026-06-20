@@ -182,6 +182,12 @@ MAPS: dict[str, Graph] = {
          (120, 520), (560, 520), (560, 260), (760, 260)],
         slots=[(250, 90), (240, 300), (430, 520)],
     ),
+    "gauntlet": _linear(
+        "gauntlet",
+        [(-30, 80), (180, 80), (180, 260), (380, 260), (380, 80), (560, 80),
+         (560, 300), (260, 300), (260, 480), (620, 480), (620, 200), (760, 200)],
+        slots=[(180, 260), (380, 170), (560, 300), (260, 480)],
+    ),
     # A real branch: traffic splits at n1 into a top and bottom lane, then
     # rejoins at n6. Place a gate at n1 to route each kind down the lane whose
     # consumers can handle it.

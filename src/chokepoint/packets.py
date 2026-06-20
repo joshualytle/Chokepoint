@@ -123,6 +123,14 @@ def overkill_wave(wave_idx: int, leaked: dict[str, int]) -> Wave:
     ]
 
 
+def calm_wave(wave_idx: int, leaked: dict[str, int]) -> Wave:
+    """Gentler than Easy — fewer packets, looser gaps. A learning pace."""
+    return [
+        (kind, max(1, round(count * 0.6)), gap * 1.4, delay)
+        for kind, count, gap, delay in easy_wave(wave_idx, leaked)
+    ]
+
+
 def adaptive_wave(wave_idx: int, leaked: dict[str, int]) -> Wave:
     """Press the weak spot: add a burst of whichever kind has leaked the most.
 
@@ -144,5 +152,6 @@ DIFFICULTIES: dict[str, WaveStrategy] = {
     "easy": easy_wave,
     "adaptive": adaptive_wave,
     "overkill": overkill_wave,
+    "calm": calm_wave,
 }
 DIFFICULTY_LIST: list[str] = list(DIFFICULTIES)

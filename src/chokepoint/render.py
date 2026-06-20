@@ -758,15 +758,18 @@ def main() -> None:  # pragma: no cover - needs a display
             cap = (world.limiter_at(hovered_node).buffer_cap  # type: ignore[union-attr]
                    if world.limiter_at(hovered_node) else QUEUE_CAP)
             served: set[str] = set()
+            tput = 0.0
             for t in world.turrets:
                 if t.node == hovered_node:
                     served |= t.accepts()
+                    tput += t.dps()
             role = ("source" if hovered_node == world.map.source else
                     "sink" if hovered_node == world.map.sink else "node")
-            tooltip([f"{role} {hovered_node}",
-                     f"queue {len(q)}/{cap}",
-                     "serves: " + (", ".join(sorted(served)) if served else "(pass-through)")],
-                    INK)
+            node_lines = [f"{role} {hovered_node}", f"queue {len(q)}/{cap}",
+                          "serves: " + (", ".join(sorted(served)) if served else "(pass-through)")]
+            if tput:
+                node_lines.append(f"throughput {tput:.0f}/s")
+            tooltip(node_lines, INK)
 
         # ---- help overlay (toggle H): controls + kind/gun legend ----
         if help_mode and not world.over:
@@ -914,13 +917,17 @@ def main() -> None:  # pragma: no cover - needs a display
             text(msg, GW // 2 - 110, 56, F_L, PHOS if world.won else DANGER)
             text(f"score {end_score['score']}    best {end_score['best']}",
                  GW // 2 - 90, 90, F_M, INK)
+            handled = sum(s.handled for s in world.stats.values())
+            leaked = sum(s.leaked for s in world.stats.values())
+            text(f"waves cleared {world.wave_idx}   ·   handled {handled}   ·   "
+                 f"leaked {leaked}", GW // 2 - 150, 112, F_S, MUTED)
             if not world.won:
                 # incident post-mortem: what failed, on which kinds and nodes
                 deb = summarize_failure(world)
-                text(deb.cause, 40, 120, F_S, INK)
-                text("WHERE IT BROKE", 40, 148, F_S, MUTED)
+                text(deb.cause, 40, 138, F_S, INK)
+                text("WHERE IT BROKE", 40, 164, F_S, MUTED)
                 for i, ln in enumerate(deb.lines[:6]):
-                    text("- " + ln, 48, 168 + i * 18, F_S, DANGER)
+                    text("- " + ln, 48, 184 + i * 18, F_S, DANGER)
             text("Press R to retry, or edit loadout.py and F5.",
                  GW // 2 - 150, WIN_H - 80, F_S, INK)
 

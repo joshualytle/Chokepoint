@@ -20,7 +20,7 @@ KINDS: dict[str, dict] = {
     "endpoint":   {"color": (229, 85, 110),  "desc": "Endpoint/EDR detections — heavy to process."},
     "firewall":   {"color": (174, 196, 214), "desc": "Firewall allow/deny and port scans."},
     "email":      {"color": (235, 215, 90),  "desc": "Email-security / phishing-report alerts."},
-    "waf":        {"color": (0, 200, 200),    "desc": "Web-app firewall hits / injection attempts."},
+    "waf":        {"color": (0, 200, 200),    "desc": "Web-app firewall / injection hits."},
     "vuln":       {"color": (255, 120, 200),  "desc": "Vulnerability-scan findings to triage."},
 }
 KIND_LIST: list[str] = list(KINDS)

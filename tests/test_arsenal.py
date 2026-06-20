@@ -103,3 +103,11 @@ def test_perimeter_sweep_synergy():
     b = Turret(0, 0, make_gun("sentinel"), id="T2")
     mult = compute_synergy_mult([a, b])
     assert mult["T1"] > 1.0 and mult["T2"] > 1.0
+
+
+def test_active_synergies_lists_present_pairs():
+    from chokepoint.arsenal import active_synergies
+    turrets = [Turret(0, 0, make_gun("sieve")), Turret(0, 0, make_gun("auditor"))]
+    names = [s.name for s in active_synergies(turrets)]
+    assert "Correlation" in names
+    assert active_synergies([Turret(0, 0, make_gun("sieve"))]) == []

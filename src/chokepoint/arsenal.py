@@ -242,6 +242,12 @@ SYNERGIES: list[Synergy] = [
 ]
 
 
+def active_synergies(turrets: list[Turret]) -> list[Synergy]:
+    """Synergies whose full gun pair is currently placed."""
+    present = {t.gun.name for t in turrets}
+    return [syn for syn in SYNERGIES if syn.guns <= present]
+
+
 def compute_synergy_mult(turrets: list[Turret]) -> dict[str, float]:
     """Return a per-turret-id throughput multiplier from any active synergies."""
     present = {t.gun.name for t in turrets}

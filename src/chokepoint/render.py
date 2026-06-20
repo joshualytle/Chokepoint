@@ -36,7 +36,7 @@ from typing import Any
 
 from . import llm_assist
 from . import loadout as loadout_mod
-from .arsenal import GUN_LIBRARY, MODULE_LIBRARY, gun_cost, make_gun
+from .arsenal import GUN_LIBRARY, MODULE_LIBRARY, active_synergies, gun_cost, make_gun
 from .codebuffer import TextBuffer
 from .editor import ArsenalEditor
 from .gates import DEFAULT_GATE_COST
@@ -628,7 +628,11 @@ def main() -> None:  # pragma: no cover - needs a display
 
         row += 8
         text("UNLOCKED: " + ", ".join(sorted(world.unlocked())), PANEL_X, row, F_S, MUTED)
-        row += 26
+        row += 18
+        syns = active_synergies(world.turrets)
+        if syns:
+            text("SYNERGY: " + ", ".join(s.name for s in syns), PANEL_X, row, F_S, PHOS)
+        row += 18
 
         panel_w = WIN_W - PANEL_X - 14
         palette_hits.clear()

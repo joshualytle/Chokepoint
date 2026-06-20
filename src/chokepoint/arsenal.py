@@ -61,6 +61,10 @@ register_module(Module("adapter_email", "Lets a gun also accept email-security a
                        unlock_wave=3, add_accepts=frozenset({"email"}), cost=60))
 register_module(Module("adapter_waf", "Lets a gun also accept web-app firewall hits.",
                        unlock_wave=5, add_accepts=frozenset({"waf"}), cost=70))
+register_module(Module("adapter_cloudtrail", "Lets a gun also accept cloud audit events.",
+                       unlock_wave=3, add_accepts=frozenset({"cloudtrail"}), cost=65))
+register_module(Module("adapter_vuln", "Lets a gun also accept vulnerability findings.",
+                       unlock_wave=6, add_accepts=frozenset({"vuln"}), cost=75))
 register_module(Module("boost", "Boost: +8 processing per shot.",
                        unlock_wave=4, damage_bonus=8, cost=85))
 

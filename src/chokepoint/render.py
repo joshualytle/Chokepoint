@@ -97,6 +97,7 @@ def main() -> None:  # pragma: no cover - needs a display
     show_intro = True            # one-time welcome/walkthrough overlay
     speed = 1                    # sim speed multiplier (F cycles 1x/2x/3x)
     sandbox = False              # practice mode: free credits to experiment (K)
+    prev_wave = 0                # to announce wave clears
     HISCORE_PATH = "chokepoint_highscore.txt"
     end_score = {"saved": False, "score": 0, "best": load_highscore(HISCORE_PATH)}
     # palette rows registered each frame so panel clicks can be mapped to actions:
@@ -457,6 +458,9 @@ def main() -> None:  # pragma: no cover - needs a display
             while acc > 0:
                 world.step(min(1 / 60, acc))
                 acc -= 1 / 60
+        if world.wave_idx > prev_wave and not world.over:  # announce a wave clear
+            say(f"Wave {world.wave_idx} cleared!  +{world.wave_income(world.wave_idx)} credits")
+        prev_wave = world.wave_idx
 
         coach = coaching(world)  # live advice; top one is shown, all listed in metrics
         coach_c = {"danger": DANGER, "warn": AMBER, "tip": (130, 170, 255), "ok": PHOS}

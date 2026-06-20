@@ -111,6 +111,16 @@ def test_long_run_stable():
     assert w.level >= 1
 
 
+def test_well_covered_loadout_progresses_on_calm():
+    # guns covering the early kinds, gentle pace -> the run should advance waves
+    gm = MAPS["switchback"]
+    w = World(gm, difficulty="calm")
+    w.set_turrets([Turret(200, 140, make_gun("sieve")),    # auth/dns
+                   Turret(440, 420, make_gun("scatter"))])  # ids/firewall
+    step_for(w, 120)
+    assert w.wave_idx >= 2  # cleared at least a couple of waves, didn't insta-die
+
+
 def test_upcoming_kinds_counts_the_queued_wave():
     w = make_world([Turret(200, 140, make_gun("sieve"))])
     w.wave_idx = 3

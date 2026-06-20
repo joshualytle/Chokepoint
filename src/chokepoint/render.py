@@ -642,12 +642,15 @@ def main() -> None:  # pragma: no cover - needs a display
         # per-kind table
         text("KIND        in  ok  leak  now", PANEL_X, 100, F_S, MUTED)
         row = 118
+        gap_kinds = world.coverage_gaps()
         for k, s in world.stats.items():
             if s.spawned == 0:
                 continue
             pygame.draw.rect(screen, KINDS[k]["color"], (PANEL_X, row + 2, 8, 8))
-            line = f"{k:<10} {s.spawned:>3} {s.handled:>3} {s.leaked:>4} {s.inflight:>4}"
-            text(line, PANEL_X + 14, row, F_S, INK if s.leaked == 0 else DANGER)
+            gap = k in gap_kinds
+            mark = "!" if gap else " "  # uncovered kinds flagged before they pile up
+            line = f"{mark}{k:<9} {s.spawned:>3} {s.handled:>3} {s.leaked:>4} {s.inflight:>4}"
+            text(line, PANEL_X + 14, row, F_S, DANGER if (gap or s.leaked) else INK)
             row += 18
 
         row += 8

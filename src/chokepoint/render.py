@@ -31,6 +31,7 @@ Everything is charged against your credits, which grow as you clear waves.
 from __future__ import annotations
 
 import importlib
+import math
 import threading
 from typing import Any
 
@@ -346,6 +347,16 @@ def main() -> None:  # pragma: no cover - needs a display
                     editor.select_gate()  # gate-placement mode
                 elif edit_mode and ev.key == pygame.K_b:
                     editor.select_limiter()  # quelimiter (buffer) placement mode
+                elif edit_mode and ev.key == pygame.K_x:
+                    for t in editor.to_turrets():    # clear all placements, refunded
+                        world.bank.earn(gun_cost(t.gun))
+                    for gt in editor.to_gates():
+                        world.bank.earn(gt.cost)
+                    for lm in editor.to_limiters():
+                        world.bank.earn(lm.cost)
+                    editor.clear()
+                    sync_world()
+                    say("cleared all placements (refunded)")
                 elif edit_mode and pygame.K_1 <= ev.key <= pygame.K_9:
                     guns = editor.available_guns()
                     idx = ev.key - pygame.K_1
@@ -456,9 +467,18 @@ def main() -> None:  # pragma: no cover - needs a display
             pygame.draw.line(screen, GRID, (x, 0), (x, WIN_H))
         for y in range(0, WIN_H, 40):
             pygame.draw.line(screen, GRID, (0, y), (GW, y))
-        # ---- topology: edges, then nodes with their queues ----
+        # ---- topology: edges (with a flow-direction arrow), then nodes ----
         for src, dst in world.map.edges():
-            pygame.draw.line(screen, (42, 66, 89), world.map.pos(src), world.map.pos(dst), 12)
+            ax, ay = world.map.pos(src)
+            bx, by = world.map.pos(dst)
+            pygame.draw.line(screen, (42, 66, 89), (ax, ay), (bx, by), 12)
+            dist = math.hypot(bx - ax, by - ay) or 1.0
+            ux, uy = (bx - ax) / dist, (by - ay) / dist  # unit + perpendicular
+            mx2, my2 = ax + (bx - ax) * 0.55, ay + (by - ay) * 0.55
+            tip = (mx2 + ux * 7, my2 + uy * 7)
+            b1 = (mx2 - ux * 3 - uy * 5, my2 - uy * 3 + ux * 5)
+            b2 = (mx2 - ux * 3 + uy * 5, my2 - uy * 3 - ux * 5)
+            pygame.draw.polygon(screen, (70, 100, 130), [tip, b1, b2])
         worst_node, worst_depth = None, 0  # the live bottleneck this frame
         for nid, node in world.map.nodes.items():
             q = world.queue_at(nid)
@@ -639,7 +659,7 @@ def main() -> None:  # pragma: no cover - needs a display
         if edit_mode:
             text("EDIT MODE — E to exit", PANEL_X, row, F_S, PHOS)
             row += 18
-            text("click+place / drag to map · LMB turret=equip · RMB remove",
+            text("drag/click place · LMB turret=equip · RMB remove · X clear all",
                  PANEL_X, row, F_S, MUTED)
             row += 20
             text("GUNS  (click/drag or 1-9; swatches = kinds)", PANEL_X, row, F_S, MUTED)

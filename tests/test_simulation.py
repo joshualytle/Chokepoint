@@ -111,6 +111,15 @@ def test_long_run_stable():
     assert w.level >= 1
 
 
+def test_upcoming_kinds_counts_the_queued_wave():
+    w = make_world([Turret(200, 140, make_gun("sieve"))])
+    w.wave_idx = 3
+    w.load_wave(3)  # loads the wave's spawn queue
+    upcoming = w.upcoming_kinds()
+    assert sum(upcoming.values()) == len(w.spawn_q)
+    assert all(v > 0 for v in upcoming.values())
+
+
 def test_llm_unavailable_is_graceful():
     assert llm_assist.available("http://localhost:9", timeout=0.3) is False
     msg = llm_assist.diagnose("ctx", "why leaks?", url="http://localhost:9", timeout=0.3)

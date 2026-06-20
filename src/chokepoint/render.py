@@ -572,6 +572,13 @@ def main() -> None:  # pragma: no cover - needs a display
 
         if world.intermission > 0 and not world.over and not build_mode:
             text(f"Wave {world.level} incoming...", GW // 2 - 70, 14, F_M, INK)
+            # preview the upcoming kinds with swatches so you can prep coverage
+            px = GW // 2 - 70
+            for k, n in world.upcoming_kinds().items():
+                pygame.draw.rect(screen, KINDS[k]["color"], (px, 40, 8, 8))
+                label = f"{k} x{n}"
+                text(label, px + 12, 38, F_S, INK)
+                px += 12 + F_S.size(label)[0] + 12
         text(f"map: {world.map.name}   [ ] to switch", 12, WIN_H - 22, F_S, MUTED)
         speed_txt = f"   speed x{speed} (F)" if speed > 1 else "   F to fast-forward"
         sand_txt = "   · SANDBOX" if sandbox else ""

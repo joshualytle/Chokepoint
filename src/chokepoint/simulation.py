@@ -172,6 +172,13 @@ class World:
         handled = sum(s.handled for s in self.stats.values())
         return handled + 50 * self.wave_idx
 
+    def upcoming_kinds(self) -> dict[str, int]:
+        """Counts of each kind still queued to spawn (the upcoming wave preview)."""
+        counts: dict[str, int] = {}
+        for _, kind in self.spawn_q:
+            counts[kind] = counts.get(kind, 0) + 1
+        return counts
+
     def unlocked(self) -> set[str]:
         return unlocked_at(self.wave_idx)
 

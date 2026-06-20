@@ -5,7 +5,8 @@ draws state and handles input.
 
 Controls:
   [ / ]   previous / next map        R   reset
-  P       pause / resume             F5  reload your loadout.py
+  P       pause / resume             .   step one tick while paused
+  F5      reload your loadout.py
   E       toggle the placement editor (buy/place/equip/remove turrets)
   T       toggle build mode (design the topology: add nodes/edges)
   C       edit loadout.py in-app (Ctrl+S apply, Esc close)
@@ -286,6 +287,8 @@ def main() -> None:  # pragma: no cover - needs a display
                     deploy_loadout()
                 elif ev.key == pygame.K_p:
                     world.paused = not world.paused
+                elif ev.key == pygame.K_PERIOD and world.paused and not world.over:
+                    world.step(1 / 60)  # single-step one tick while paused
                 elif ev.key == pygame.K_F5:
                     importlib.reload(loadout_mod)
                     deploy_loadout(refund_current=True)
@@ -869,7 +872,7 @@ def main() -> None:  # pragma: no cover - needs a display
             end_score["saved"] = False  # arm scoring for the next game-over
 
         if world.paused and not world.over and not code_mode:
-            text("|| PAUSED — press P", GW // 2 - 70, 36, F_M, AMBER)
+            text("|| PAUSED — P resume · . step one tick", GW // 2 - 130, 36, F_M, AMBER)
 
         if world.over and not code_mode:
             if not end_score["saved"]:  # record the score once, persist the best

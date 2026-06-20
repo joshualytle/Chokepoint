@@ -167,6 +167,11 @@ class World:
     def level(self) -> int:
         return self.wave_idx + 1
 
+    def score(self) -> int:
+        """A run score: alerts handled plus a bonus for each wave cleared."""
+        handled = sum(s.handled for s in self.stats.values())
+        return handled + 50 * self.wave_idx
+
     def unlocked(self) -> set[str]:
         return unlocked_at(self.wave_idx)
 

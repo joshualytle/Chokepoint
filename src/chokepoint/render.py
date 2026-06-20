@@ -43,6 +43,7 @@ from .limiter import DEFAULT_LIMITER_COST
 from .maps import GW, MAP_LIST, MAPS
 from .metrics import summarize_failure
 from .packets import DIFFICULTY_LIST, KINDS
+from .scores import load_highscore, save_highscore
 from .simulation import MAX_LEAK, QUEUE_CAP, START_HEALTH, World
 from .syntax import spans as code_spans
 
@@ -92,6 +93,8 @@ def main() -> None:  # pragma: no cover - needs a display
     code_scroll = 0              # first visible line in the editor (mouse-wheel scroll)
     show_intro = True            # one-time welcome/walkthrough overlay
     speed = 1                    # sim speed multiplier (F cycles 1x/2x/3x)
+    HISCORE_PATH = "chokepoint_highscore.txt"
+    end_score = {"saved": False, "score": 0, "best": load_highscore(HISCORE_PATH)}
     # palette rows registered each frame so panel clicks can be mapped to actions:
     # (rect, "gun"|"mod", name)
     palette_hits: list[tuple[Any, str, str]] = []
@@ -843,22 +846,31 @@ def main() -> None:  # pragma: no cover - needs a display
                     cx = 52 + F_S.size(code_buf.lines[i][: code_buf.col])[0]
                     pygame.draw.line(screen, PHOS, (cx, y), (cx, y + 14), 1)
 
+        if not world.over:
+            end_score["saved"] = False  # arm scoring for the next game-over
+
         if world.paused and not world.over and not code_mode:
             text("|| PAUSED — press P", GW // 2 - 70, 36, F_M, AMBER)
 
         if world.over and not code_mode:
+            if not end_score["saved"]:  # record the score once, persist the best
+                end_score["score"] = world.score()
+                end_score["best"] = save_highscore(HISCORE_PATH, end_score["score"])
+                end_score["saved"] = True
             ov = pygame.Surface((GW, WIN_H), pygame.SRCALPHA)
             ov.fill((8, 14, 22, 210))
             screen.blit(ov, (0, 0))
             msg = "PIPELINE HELD" if world.won else "PIPELINE OVERWHELMED"
-            text(msg, GW // 2 - 110, 60, F_L, PHOS if world.won else DANGER)
+            text(msg, GW // 2 - 110, 56, F_L, PHOS if world.won else DANGER)
+            text(f"score {end_score['score']}    best {end_score['best']}",
+                 GW // 2 - 90, 90, F_M, INK)
             if not world.won:
                 # incident post-mortem: what failed, on which kinds and nodes
                 deb = summarize_failure(world)
-                text(deb.cause, 40, 100, F_S, INK)
-                text("WHERE IT BROKE", 40, 132, F_S, MUTED)
+                text(deb.cause, 40, 120, F_S, INK)
+                text("WHERE IT BROKE", 40, 148, F_S, MUTED)
                 for i, ln in enumerate(deb.lines[:6]):
-                    text("- " + ln, 48, 152 + i * 18, F_S, DANGER)
+                    text("- " + ln, 48, 168 + i * 18, F_S, DANGER)
             text("Press R to retry, or edit loadout.py and F5.",
                  GW // 2 - 150, WIN_H - 80, F_S, INK)
 

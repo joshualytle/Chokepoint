@@ -14,6 +14,7 @@ Controls:
   S       save the current build to loadout.py (resume it next launch / F5)
   D       cycle difficulty (easy / adaptive / overkill) — resets the run
   F       fast-forward: cycle sim speed 1x / 2x / 3x
+  K       sandbox: toggle free credits to experiment (resets the run)
   L       ask your local LLM for help (optional; off-thread, never freezes)
   hover   a turret or a legend swatch for a tooltip
 
@@ -44,7 +45,7 @@ from .maps import GW, MAP_LIST, MAPS
 from .metrics import summarize_failure
 from .packets import DIFFICULTY_LIST, KINDS
 from .scores import load_highscore, save_highscore
-from .simulation import MAX_LEAK, QUEUE_CAP, START_HEALTH, World
+from .simulation import MAX_LEAK, QUEUE_CAP, START_HEALTH, STARTING_CREDITS, World
 from .syntax import spans as code_spans
 
 QUEUE_WARN = QUEUE_CAP - 2  # queue depth at which a node's marker turns red
@@ -93,6 +94,7 @@ def main() -> None:  # pragma: no cover - needs a display
     code_scroll = 0              # first visible line in the editor (mouse-wheel scroll)
     show_intro = True            # one-time welcome/walkthrough overlay
     speed = 1                    # sim speed multiplier (F cycles 1x/2x/3x)
+    sandbox = False              # practice mode: free credits to experiment (K)
     HISCORE_PATH = "chokepoint_highscore.txt"
     end_score = {"saved": False, "score": 0, "best": load_highscore(HISCORE_PATH)}
     # palette rows registered each frame so panel clicks can be mapped to actions:
@@ -328,6 +330,15 @@ def main() -> None:  # pragma: no cover - needs a display
                     ask_llm()
                 elif ev.key == pygame.K_f:
                     speed = speed % 3 + 1  # 1x -> 2x -> 3x -> 1x
+                elif ev.key == pygame.K_k:
+                    sandbox = not sandbox  # practice mode: free credits
+                    credits = 100000 if sandbox else STARTING_CREDITS
+                    world = World(MAPS[MAP_LIST[map_i]].copy(),
+                                  difficulty=DIFFICULTY_LIST[difficulty_i],
+                                  starting_credits=credits)
+                    deploy_loadout(load_topology=False)
+                    say("sandbox ON — free credits to experiment" if sandbox
+                        else "sandbox off")
                 elif edit_mode and ev.key == pygame.K_g:
                     editor.select_gate()  # gate-placement mode
                 elif edit_mode and ev.key == pygame.K_b:
@@ -563,8 +574,9 @@ def main() -> None:  # pragma: no cover - needs a display
             text(f"Wave {world.level} incoming...", GW // 2 - 70, 14, F_M, INK)
         text(f"map: {world.map.name}   [ ] to switch", 12, WIN_H - 22, F_S, MUTED)
         speed_txt = f"   speed x{speed} (F)" if speed > 1 else "   F to fast-forward"
-        text(f"mode: {world.difficulty}   D to cycle{speed_txt}   ·   H for help",
-             12, WIN_H - 40, F_S, MUTED)
+        sand_txt = "   · SANDBOX" if sandbox else ""
+        text(f"mode: {world.difficulty}   D to cycle{speed_txt}{sand_txt}   ·   H for help",
+             12, WIN_H - 40, F_S, PHOS if sandbox else MUTED)
         # live coach: the single most important thing to fix right now
         if coach and not build_mode and not code_mode and not world.over:
             text("COACH: " + coach[0].text, 12, WIN_H - 78, F_S, coach_c[coach[0].level])
@@ -728,7 +740,7 @@ def main() -> None:  # pragma: no cover - needs a display
                 ("[ ]", "previous / next map"), ("E", "placement editor"),
                 ("G", "gate router (in editor)"), ("B", "quelimiter (in editor)"),
                 ("T", "build mode (edit topology)"), ("C", "edit loadout.py in-app"),
-                ("M", "metrics dashboard"),
+                ("K", "sandbox (free credits)"), ("M", "metrics dashboard"),
                 ("S", "save build to loadout.py"), ("D", "cycle difficulty"),
                 ("P", "pause"), ("R", "reset"), ("F", "fast-forward (1/2/3x)"),
                 ("F5", "reload loadout.py"), ("L", "local-LLM help"),

@@ -120,6 +120,14 @@ def test_upcoming_kinds_counts_the_queued_wave():
     assert all(v > 0 for v in upcoming.values())
 
 
+def test_state_summary_includes_health_and_devices():
+    w = make_world([Turret(200, 140, make_gun("sieve"))])
+    summary = llm_assist.state_summary(w)
+    assert "health=" in summary
+    assert "node=" in summary  # turret bound to a node, not a spatial range
+    assert "coverage_gaps=" in summary
+
+
 def test_llm_unavailable_is_graceful():
     assert llm_assist.available("http://localhost:9", timeout=0.3) is False
     msg = llm_assist.diagnose("ctx", "why leaks?", url="http://localhost:9", timeout=0.3)

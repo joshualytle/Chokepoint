@@ -26,9 +26,12 @@ DEFAULT_MODEL = os.environ.get("FD_LLM_MODEL", "llama3.1")
 
 SYSTEM = (
     "You are a terse assistant inside a tower-defense game that simulates a "
-    "security alert pipeline. Turrets are typed consumers; packets are typed "
-    "alerts; a turret only processes kinds its gun accepts. Diagnose coverage "
-    "gaps and throughput shortfalls in plain language, max ~6 lines."
+    "security alert pipeline. Alerts (typed packets) flow a graph and queue at "
+    "nodes; turrets are typed consumers bound to a node that only process the "
+    "kinds their gun accepts. Gates route kinds down branches; quelimiters buffer "
+    "bursts. You lose by drops (uncovered kinds or queue overflow) or by latency "
+    "(queues aging out 'health'). Diagnose coverage gaps, bottleneck nodes, and "
+    "throughput/latency shortfalls in plain language, max ~6 lines."
 )
 
 
@@ -96,15 +99,22 @@ def diagnose(
 def state_summary(world) -> str:  # noqa: ANN001 - duck-typed World to avoid import cycle
     """Build a compact context string from a World for the LLM."""
     lines = [
-        f"map={world.map.name} wave={world.level} leaks={world.leaks}",
+        f"map={world.map.name} wave={world.level} "
+        f"health={world.health:.0f} leaks={world.leaks}",
         f"coverage={sorted(world.coverage())}",
         f"coverage_gaps={sorted(world.coverage_gaps())}",
     ]
     for t in world.turrets:
-        lines.append(
-            f"{t.id} gun={t.gun.name} accepts={sorted(t.accepts())} "
-            f"range={t.range():.0f} dps={t.dps():.1f}"
-        )
+        lines.append(f"{t.id} gun={t.gun.name} node={t.node} "
+                     f"accepts={sorted(t.accepts())} dps={t.dps():.1f}")
+    for g in world.gates:
+        lines.append(f"{g.id} gate@{g.node} routes={g.routes}")
+    for lm in world.limiters:
+        lines.append(f"{lm.id} limiter@{lm.node} release={lm.release_rate:.0f}/s")
+    busy = [f"{nid}:{len(world.queue_at(nid))}"
+            for nid in world.map.nodes if world.queue_at(nid)]
+    if busy:
+        lines.append("queue_depths " + " ".join(busy))
     for k, s in world.stats.items():
         if s.spawned:
             lines.append(f"{k}: spawned={s.spawned} handled={s.handled} leaked={s.leaked}")

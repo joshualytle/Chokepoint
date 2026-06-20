@@ -13,6 +13,7 @@ Controls:
   H       toggle the help overlay (controls + kind/gun legend)
   S       save the current build to loadout.py (resume it next launch / F5)
   D       cycle difficulty (easy / adaptive / overkill) — resets the run
+  F       fast-forward: cycle sim speed 1x / 2x / 3x
   L       ask your local LLM for help (optional; off-thread, never freezes)
   hover   a turret or a legend swatch for a tooltip
 
@@ -90,6 +91,7 @@ def main() -> None:  # pragma: no cover - needs a display
     code_status: dict[str, str] = {"msg": ""}
     code_scroll = 0              # first visible line in the editor (mouse-wheel scroll)
     show_intro = True            # one-time welcome/walkthrough overlay
+    speed = 1                    # sim speed multiplier (F cycles 1x/2x/3x)
     # palette rows registered each frame so panel clicks can be mapped to actions:
     # (rect, "gun"|"mod", name)
     palette_hits: list[tuple[Any, str, str]] = []
@@ -321,6 +323,8 @@ def main() -> None:  # pragma: no cover - needs a display
                     say(f"difficulty: {world.difficulty} (run reset)")
                 elif ev.key == pygame.K_l:
                     ask_llm()
+                elif ev.key == pygame.K_f:
+                    speed = speed % 3 + 1  # 1x -> 2x -> 3x -> 1x
                 elif edit_mode and ev.key == pygame.K_g:
                     editor.select_gate()  # gate-placement mode
                 elif edit_mode and ev.key == pygame.K_b:
@@ -421,7 +425,7 @@ def main() -> None:  # pragma: no cover - needs a display
         editor.set_unlocked(world.unlocked())
 
         if not world.paused and not world.over and not code_mode and not show_intro:
-            acc = dt
+            acc = dt * speed  # fast-forward runs more sim time per frame
             while acc > 0:
                 world.step(min(1 / 60, acc))
                 acc -= 1 / 60
@@ -555,7 +559,9 @@ def main() -> None:  # pragma: no cover - needs a display
         if world.intermission > 0 and not world.over and not build_mode:
             text(f"Wave {world.level} incoming...", GW // 2 - 70, 14, F_M, INK)
         text(f"map: {world.map.name}   [ ] to switch", 12, WIN_H - 22, F_S, MUTED)
-        text(f"mode: {world.difficulty}   D to cycle   ·   H for help", 12, WIN_H - 40, F_S, MUTED)
+        speed_txt = f"   speed x{speed} (F)" if speed > 1 else "   F to fast-forward"
+        text(f"mode: {world.difficulty}   D to cycle{speed_txt}   ·   H for help",
+             12, WIN_H - 40, F_S, MUTED)
         # live coach: the single most important thing to fix right now
         if coach and not build_mode and not code_mode and not world.over:
             text("COACH: " + coach[0].text, 12, WIN_H - 78, F_S, coach_c[coach[0].level])
@@ -721,8 +727,8 @@ def main() -> None:  # pragma: no cover - needs a display
                 ("T", "build mode (edit topology)"), ("C", "edit loadout.py in-app"),
                 ("M", "metrics dashboard"),
                 ("S", "save build to loadout.py"), ("D", "cycle difficulty"),
-                ("P", "pause"), ("R", "reset"), ("F5", "reload loadout.py"),
-                ("L", "local-LLM help"),
+                ("P", "pause"), ("R", "reset"), ("F", "fast-forward (1/2/3x)"),
+                ("F5", "reload loadout.py"), ("L", "local-LLM help"),
             ]
             text("CONTROLS", 24, 52, F_S, MUTED)
             yy = 70

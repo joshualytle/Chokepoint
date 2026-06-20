@@ -27,16 +27,21 @@ Requires Python 3.11+ and pygame 2.6+.
 |----------|------------------------------------------|
 | `[` `]`  | previous / next map                      |
 | `R`      | reset the run                            |
-| `P`      | pause / resume                           |
+| `P`      | pause / resume  (`.` steps one tick)     |
 | `E`      | toggle the in-game placement editor      |
+| `G` `B`  | in editor: select gate / quelimiter      |
+| `X`      | in editor: clear all placements (refund) |
 | `T`      | toggle build mode (design the topology)  |
-| `C`      | edit `loadout.py` in-app (Ctrl+S to apply)|
+| `C`      | edit `loadout.py` in-app (Ctrl+S apply)  |
 | `M`      | toggle the metrics dashboard             |
-| `S`      | save your build to `loadout.py`          |
-| `D`      | cycle difficulty (easy/adaptive/overkill)|
+| `H`      | help overlay (controls + legend)         |
+| `S`      | save your build + topology to `loadout.py`|
+| `D`      | cycle difficulty (calm/easy/adaptive/overkill)|
+| `F`      | fast-forward (1x / 2x / 3x)              |
+| `K`      | sandbox: free credits to experiment      |
 | `F5`     | reload your `loadout.py` (after editing) |
 | `L`      | ask your local LLM for help (optional)   |
-| hover    | a turret or legend swatch → tooltip      |
+| hover    | turret / gate / limiter / node → tooltip |
 
 ## Two ways to build a loadout
 

@@ -30,8 +30,10 @@ Everything is charged against your credits, which grow as you clear waves.
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import math
+import sys
 import threading
 from typing import Any
 
@@ -53,7 +55,11 @@ from .syntax import spans as code_spans
 QUEUE_WARN = QUEUE_CAP - 2  # queue depth at which a node's marker turns red
 
 
-def main() -> None:  # pragma: no cover - needs a display
+async def main() -> None:  # pragma: no cover - needs a display
+    # pygbag (pygame -> WASM) requires an async entry point and one
+    # ``await asyncio.sleep(0)`` per frame so the browser event loop can run.
+    # ``asyncio.run(main())`` works identically on the desktop, so the same
+    # loop drives both the native and web builds.
     import pygame
 
     pygame.init()
@@ -207,6 +213,12 @@ def main() -> None:  # pragma: no cover - needs a display
             )
             llm_state["status"] = "done"
 
+        if sys.platform == "emscripten":
+            # Pyodide has no real threads and the browser sandbox blocks raw
+            # sockets, so the local-LLM helper can't run on the web build.
+            llm_state["status"] = "done"
+            llm_state["text"] = "Local-LLM help is unavailable in the browser build."
+            return
         threading.Thread(target=work, daemon=True).start()
 
     def wrap(text: str, width: int, f) -> list[str]:
@@ -962,5 +974,11 @@ def main() -> None:  # pragma: no cover - needs a display
                 y += fnt.get_height() + 6
 
         pygame.display.flip()
+        await asyncio.sleep(0)  # yield to the browser event loop (no-op cost on desktop)
 
     pygame.quit()
+
+
+def run() -> None:  # pragma: no cover - thin sync wrapper around the async loop
+    """Synchronous entry point for the desktop build and the console script."""
+    asyncio.run(main())

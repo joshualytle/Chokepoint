@@ -11,9 +11,10 @@ dependencies = ["pygame>=2.6"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11"]
+web = ["pygbag>=0.9"]   # pygame -> WebAssembly build (browser target)
 
 [project.scripts]
-chokepoint = "chokepoint.render:main"
+chokepoint = "chokepoint.render:run"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

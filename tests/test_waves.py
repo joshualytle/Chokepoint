@@ -82,6 +82,15 @@ def test_overkill_is_heavier_and_tighter_than_easy():
     assert over[0][2] < easy[0][2]
 
 
+def test_calm_is_lighter_and_looser_than_easy():
+    from chokepoint.packets import calm_wave
+    easy = easy_wave(3, {})
+    calm = calm_wave(3, {})
+    assert total_count(calm) <= total_count(easy)
+    assert calm[0][2] > easy[0][2]  # looser gaps
+    assert "calm" in DIFFICULTIES
+
+
 # ---- adaptive = press the weak spot ---- #
 def test_adaptive_without_leaks_matches_easy():
     assert adaptive_wave(2, {}) == easy_wave(2, {})

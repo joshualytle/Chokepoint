@@ -59,6 +59,14 @@ register_module(Module("adapter_endpoint", "Lets a gun also accept endpoint dete
                        unlock_wave=4, add_accepts=frozenset({"endpoint"}), cost=80))
 register_module(Module("adapter_email", "Lets a gun also accept email-security alerts.",
                        unlock_wave=3, add_accepts=frozenset({"email"}), cost=60))
+register_module(Module("adapter_waf", "Lets a gun also accept web-app firewall hits.",
+                       unlock_wave=5, add_accepts=frozenset({"waf"}), cost=70))
+register_module(Module("adapter_cloudtrail", "Lets a gun also accept cloud audit events.",
+                       unlock_wave=3, add_accepts=frozenset({"cloudtrail"}), cost=65))
+register_module(Module("adapter_vuln", "Lets a gun also accept vulnerability findings.",
+                       unlock_wave=6, add_accepts=frozenset({"vuln"}), cost=75))
+register_module(Module("boost", "Boost: +8 processing per shot.",
+                       unlock_wave=4, damage_bonus=8, cost=85))
 
 
 # --------------------------------------------------------------------------- #
@@ -153,6 +161,27 @@ def quarantine() -> Gun:
                accepts=frozenset({"email"}), unlock_wave=2, cost=130)
 
 
+@register_gun("bastion")
+def bastion() -> Gun:
+    return Gun("bastion", "Edge defense for web-app firewall traffic.",
+               fire_rate=3.5, damage=5, base_range=150,
+               accepts=frozenset({"waf"}), unlock_wave=5, cost=140)
+
+
+@register_gun("sentinel")
+def sentinel() -> Gun:
+    return Gun("sentinel", "Triage engine for vulnerability findings.",
+               fire_rate=2.0, damage=11, base_range=160,
+               accepts=frozenset({"vuln"}), unlock_wave=6, cost=180)
+
+
+@register_gun("correlator")
+def correlator() -> Gun:
+    return Gun("correlator", "SIEM correlator: cross-checks auth and cloud audit.",
+               fire_rate=2.5, damage=7, base_range=170,
+               accepts=frozenset({"auth", "cloudtrail"}), unlock_wave=5, cost=210)
+
+
 def make_gun(name: str) -> Gun:
     """Build a fresh gun instance from the library by name."""
     if name not in GUN_LIBRARY:
@@ -210,7 +239,17 @@ SYNERGIES: list[Synergy] = [
             "Broad + heavy coverage. +20% throughput to both.", 1.20),
     Synergy(frozenset({"quarantine", "sieve"}), "Inbox correlation",
             "Phishing + auth cross-check. +20% throughput to both.", 1.20),
+    Synergy(frozenset({"bastion", "sentinel"}), "Perimeter sweep",
+            "WAF + vuln triage reinforce each other. +20% throughput to both.", 1.20),
+    Synergy(frozenset({"correlator", "scatter"}), "Signal fusion",
+            "Correlation + broad coverage. +15% throughput to both.", 1.15),
 ]
+
+
+def active_synergies(turrets: list[Turret]) -> list[Synergy]:
+    """Synergies whose full gun pair is currently placed."""
+    present = {t.gun.name for t in turrets}
+    return [syn for syn in SYNERGIES if syn.guns <= present]
 
 
 def compute_synergy_mult(turrets: list[Turret]) -> dict[str, float]:

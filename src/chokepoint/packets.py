@@ -20,6 +20,8 @@ KINDS: dict[str, dict] = {
     "endpoint":   {"color": (229, 85, 110),  "desc": "Endpoint/EDR detections — heavy to process."},
     "firewall":   {"color": (174, 196, 214), "desc": "Firewall allow/deny and port scans."},
     "email":      {"color": (235, 215, 90),  "desc": "Email-security / phishing-report alerts."},
+    "waf":        {"color": (0, 200, 200),    "desc": "Web-app firewall / injection hits."},
+    "vuln":       {"color": (255, 120, 200),  "desc": "Vulnerability-scan findings to triage."},
 }
 KIND_LIST: list[str] = list(KINDS)
 
@@ -59,7 +61,7 @@ class Packet:
 
 # kind -> the order it enters the curriculum (its handler unlocks earlier)
 INTRO_ORDER: list[str] = ["auth", "ids", "dns", "firewall", "email",
-                          "cloudtrail", "endpoint"]
+                          "cloudtrail", "endpoint", "waf", "vuln"]
 SUBWAVES = 3  # per kind: slow, fast, faster+burst
 
 
@@ -121,6 +123,14 @@ def overkill_wave(wave_idx: int, leaked: dict[str, int]) -> Wave:
     ]
 
 
+def calm_wave(wave_idx: int, leaked: dict[str, int]) -> Wave:
+    """Gentler than Easy — fewer packets, looser gaps. A learning pace."""
+    return [
+        (kind, max(1, round(count * 0.6)), gap * 1.4, delay)
+        for kind, count, gap, delay in easy_wave(wave_idx, leaked)
+    ]
+
+
 def adaptive_wave(wave_idx: int, leaked: dict[str, int]) -> Wave:
     """Press the weak spot: add a burst of whichever kind has leaked the most.
 
@@ -142,5 +152,6 @@ DIFFICULTIES: dict[str, WaveStrategy] = {
     "easy": easy_wave,
     "adaptive": adaptive_wave,
     "overkill": overkill_wave,
+    "calm": calm_wave,
 }
 DIFFICULTY_LIST: list[str] = list(DIFFICULTIES)

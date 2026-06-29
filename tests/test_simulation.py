@@ -111,6 +111,33 @@ def test_long_run_stable():
     assert w.level >= 1
 
 
+def test_well_covered_loadout_progresses_on_calm():
+    # guns covering the early kinds, gentle pace -> the run should advance waves
+    gm = MAPS["switchback"]
+    w = World(gm, difficulty="calm")
+    w.set_turrets([Turret(200, 140, make_gun("sieve")),    # auth/dns
+                   Turret(440, 420, make_gun("scatter"))])  # ids/firewall
+    step_for(w, 120)
+    assert w.wave_idx >= 2  # cleared at least a couple of waves, didn't insta-die
+
+
+def test_upcoming_kinds_counts_the_queued_wave():
+    w = make_world([Turret(200, 140, make_gun("sieve"))])
+    w.wave_idx = 3
+    w.load_wave(3)  # loads the wave's spawn queue
+    upcoming = w.upcoming_kinds()
+    assert sum(upcoming.values()) == len(w.spawn_q)
+    assert all(v > 0 for v in upcoming.values())
+
+
+def test_state_summary_includes_health_and_devices():
+    w = make_world([Turret(200, 140, make_gun("sieve"))])
+    summary = llm_assist.state_summary(w)
+    assert "health=" in summary
+    assert "node=" in summary  # turret bound to a node, not a spatial range
+    assert "coverage_gaps=" in summary
+
+
 def test_llm_unavailable_is_graceful():
     assert llm_assist.available("http://localhost:9", timeout=0.3) is False
     msg = llm_assist.diagnose("ctx", "why leaks?", url="http://localhost:9", timeout=0.3)

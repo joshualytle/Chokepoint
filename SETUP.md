@@ -5,6 +5,10 @@ different kinds that flood a map; **turrets** are typed consumers that can only
 process the kinds their **gun** accepts. You win by composing guns, modules, and
 placements so your coverage and throughput absorb the flood.
 
+New here? A short **walkthrough** appears on launch (press any key to start),
+and a live **COACH** line at the bottom-left always names the most important
+thing to fix right now — press `M` for the full coaching list and metrics.
+
 ## Install & run
 
 ```bash
@@ -23,14 +27,21 @@ Requires Python 3.11+ and pygame 2.6+.
 |----------|------------------------------------------|
 | `[` `]`  | previous / next map                      |
 | `R`      | reset the run                            |
-| `P`      | pause / resume                           |
+| `P`      | pause / resume  (`.` steps one tick)     |
 | `E`      | toggle the in-game placement editor      |
+| `G` `B`  | in editor: select gate / quelimiter      |
+| `X`      | in editor: clear all placements (refund) |
+| `T`      | toggle build mode (design the topology)  |
+| `C`      | edit `loadout.py` in-app (Ctrl+S apply)  |
 | `M`      | toggle the metrics dashboard             |
-| `S`      | save your build to `loadout.py`          |
-| `D`      | cycle difficulty (easy/adaptive/overkill)|
+| `H`      | help overlay (controls + legend)         |
+| `S`      | save your build + topology to `loadout.py`|
+| `D`      | cycle difficulty (calm/easy/adaptive/overkill)|
+| `F`      | fast-forward (1x / 2x / 3x)              |
+| `K`      | sandbox: free credits to experiment      |
 | `F5`     | reload your `loadout.py` (after editing) |
 | `L`      | ask your local LLM for help (optional)   |
-| hover    | a turret or legend swatch → tooltip      |
+| hover    | turret / gate / limiter / node → tooltip |
 
 ## Two ways to build a loadout
 
@@ -57,6 +68,15 @@ build*, and the editor spends from the same credits for changes.
 Press `S` to **save** your in-game build back to `loadout.py` — it generates the
 Python for you. Relaunch (or press `F5`) and you pick up right where you left
 off. That's the export: your work is just a `.py` file you own.
+
+## Build your own topology (press `T`)
+
+Press `T` for build mode and shape the pipeline itself: **click empty space** to
+add a node, **click one node then another** to draw an edge between them, and
+**right-click a node** to remove it. Edges must flow forward — an edge that would
+create a loop is rejected (packets would circle forever). The source and sink
+can't be removed. Then drop turrets, gates, and limiters onto the layout you
+designed. (Topology edits aren't saved by `S` yet — that's coming.)
 
 ## Credits — design under a budget
 
@@ -111,6 +131,11 @@ def build_loadout(unlocked, slots):
         Turret(*slots[1], gun=make_gun("scatter")),   # accepts ids, firewall
     ]
 ```
+
+You can edit this file **inside the game**: press `C` for the in-app code
+editor, change `build_loadout`, and press `Ctrl+S` to apply (it validates first,
+so a typo is reported instead of breaking the file). `Esc` closes the editor.
+Or edit the file externally and press `F5`.
 
 A turret's position lives on the object (`Turret(x, y, gun=...)`). The map is a
 graph of **nodes** (junctions where packets queue) joined by edges; when a

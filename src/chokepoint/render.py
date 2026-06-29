@@ -5,12 +5,17 @@ draws state and handles input.
 
 Controls:
   [ / ]   previous / next map        R   reset
-  P       pause / resume             F5  reload your loadout.py
+  P       pause / resume             .   step one tick while paused
+  F5      reload your loadout.py
   E       toggle the placement editor (buy/place/equip/remove turrets)
+  T       toggle build mode (design the topology: add nodes/edges)
+  C       edit loadout.py in-app (Ctrl+S apply, Esc close)
   M       toggle the metrics dashboard (queues, by-kind, health trend)
   H       toggle the help overlay (controls + kind/gun legend)
   S       save the current build to loadout.py (resume it next launch / F5)
   D       cycle difficulty (easy / adaptive / overkill) — resets the run
+  F       fast-forward: cycle sim speed 1x / 2x / 3x
+  K       sandbox: toggle free credits to experiment (resets the run)
   L       ask your local LLM for help (optional; off-thread, never freezes)
   hover   a turret or a legend swatch for a tooltip
 
@@ -26,19 +31,24 @@ Everything is charged against your credits, which grow as you clear waves.
 from __future__ import annotations
 
 import importlib
+import math
 import threading
 from typing import Any
 
 from . import llm_assist
 from . import loadout as loadout_mod
-from .arsenal import GUN_LIBRARY, MODULE_LIBRARY, gun_cost, make_gun
+from .arsenal import GUN_LIBRARY, MODULE_LIBRARY, active_synergies, gun_cost, make_gun
+from .codebuffer import TextBuffer
 from .editor import ArsenalEditor
 from .gates import DEFAULT_GATE_COST
+from .hints import coaching
 from .limiter import DEFAULT_LIMITER_COST
 from .maps import GW, MAP_LIST, MAPS
 from .metrics import summarize_failure
 from .packets import DIFFICULTY_LIST, KINDS
-from .simulation import MAX_LEAK, QUEUE_CAP, START_HEALTH, World
+from .scores import load_highscore, save_highscore
+from .simulation import MAX_LEAK, QUEUE_CAP, START_HEALTH, STARTING_CREDITS, World
+from .syntax import spans as code_spans
 
 QUEUE_WARN = QUEUE_CAP - 2  # queue depth at which a node's marker turns red
 
@@ -71,12 +81,25 @@ def main() -> None:  # pragma: no cover - needs a display
 
     map_i = 0
     difficulty_i = 0
-    world = World(MAPS[MAP_LIST[map_i]], difficulty=DIFFICULTY_LIST[difficulty_i])
+    world = World(MAPS[MAP_LIST[map_i]].copy(), difficulty=DIFFICULTY_LIST[difficulty_i])
     editor = ArsenalEditor(world.unlocked(), bank=world.bank)
     edit_mode = False
     metrics_mode = False
     help_mode = False
     drag_item: tuple[str, str] | None = None  # (kind, name) being dragged from the palette
+    build_mode = False           # topology editing: add/remove nodes and edges
+    edge_src: str | None = None  # first node picked while drawing an edge
+    NODE_PICK = 16               # click within this many px counts as clicking a node
+    code_mode = False            # in-app code editor for loadout.py
+    code_buf = TextBuffer()
+    code_status: dict[str, str] = {"msg": ""}
+    code_scroll = 0              # first visible line in the editor (mouse-wheel scroll)
+    show_intro = True            # one-time welcome/walkthrough overlay
+    speed = 1                    # sim speed multiplier (F cycles 1x/2x/3x)
+    sandbox = False              # practice mode: free credits to experiment (K)
+    prev_wave = 0                # to announce wave clears
+    HISCORE_PATH = "chokepoint_highscore.txt"
+    end_score = {"saved": False, "score": 0, "best": load_highscore(HISCORE_PATH)}
     # palette rows registered each frame so panel clicks can be mapped to actions:
     # (rect, "gun"|"mod", name)
     palette_hits: list[tuple[Any, str, str]] = []
@@ -87,14 +110,19 @@ def main() -> None:  # pragma: no cover - needs a display
     def say(text: str, ok: bool = True) -> None:
         toast["text"], toast["ttl"], toast["ok"] = text, 2.5, ok
 
-    def deploy_loadout(refund_current: bool = False) -> None:
+    def deploy_loadout(refund_current: bool = False, load_topology: bool = True) -> None:
         """(Re)build turrets from loadout.py, costed against the budget.
 
         The editor is the single source of truth; loadout.py is its initial paid
         build. ``refund_current`` (used by F5) returns the cost of whatever is
         deployed before re-buying, so reloading the file never double-charges.
+        ``load_topology`` applies a saved custom map (skipped when switching maps).
         """
         nonlocal editor
+        build_topology = getattr(loadout_mod, "build_topology", None)
+        if load_topology and build_topology is not None:
+            world.map = build_topology()   # resume a designed map
+            world.packets.clear()
         if refund_current:
             for t in world.turrets:
                 world.bank.earn(gun_cost(t.gun))
@@ -124,12 +152,49 @@ def main() -> None:  # pragma: no cover - needs a display
         world.set_limiters(editor.to_limiters())
         world.autoroute()
 
+    def node_under(mx: int, my: int) -> str | None:
+        """The node id under a click (within NODE_PICK px), or None for empty space."""
+        if not world.map.nodes:
+            return None
+        nid = world.map.nearest_node(mx, my)
+        nx, ny = world.map.pos(nid)
+        return nid if (nx - mx) ** 2 + (ny - my) ** 2 <= NODE_PICK * NODE_PICK else None
+
+    def topology_edited() -> None:
+        """After a structural change: drop in-flight packets (they may reference a
+        removed node) and re-snap devices."""
+        world.packets.clear()
+        world.rebind()
+
+    def apply_code(src: str) -> None:
+        """Validate the edited loadout source, then write + reload + redeploy.
+
+        We compile and dry-run build_loadout first, so a syntax/author error is
+        reported in the editor and the on-disk loadout.py is never corrupted.
+        """
+        ns: dict = {}
+        try:
+            exec(compile(src, loadout_mod.__file__, "exec"), ns)  # noqa: S102 - intended in-app eval
+            if "build_loadout" not in ns:
+                raise ValueError("define build_loadout(unlocked, slots)")
+            ns["build_loadout"](world.unlocked(), world.map.slots)
+        except Exception as err:  # surface any author error; never crash the loop
+            code_status["msg"] = f"error: {err}"
+            say("code not applied — see editor", ok=False)
+            return
+        with open(loadout_mod.__file__, "w", encoding="utf-8") as fh:
+            fh.write(src)
+        importlib.reload(loadout_mod)
+        deploy_loadout(refund_current=True)
+        code_status["msg"] = "applied OK"
+        say("loadout applied from editor")
+
     def switch_map(delta: int) -> None:
         nonlocal map_i, world, edit_mode
         map_i = (map_i + delta) % len(MAP_LIST)
-        world = World(MAPS[MAP_LIST[map_i]], difficulty=DIFFICULTY_LIST[difficulty_i])
+        world = World(MAPS[MAP_LIST[map_i]].copy(), difficulty=DIFFICULTY_LIST[difficulty_i])
         edit_mode = False
-        deploy_loadout()
+        deploy_loadout(load_topology=False)  # an explicit map choice ignores the saved one
 
     def ask_llm() -> None:
         llm_state["status"] = "thinking"
@@ -163,6 +228,16 @@ def main() -> None:  # pragma: no cover - needs a display
     def text(s: str, x: int, y: int, f=F_S, c=INK) -> None:
         screen.blit(f.render(s, True, c), (x, y))
 
+    def tooltip(lines: list[str], accent=PHOS) -> None:
+        """Draw a hover tooltip box at the cursor; first line is the accented title."""
+        w = max(F_S.size(s)[0] for s in lines) + 16
+        h = len(lines) * 16 + 10
+        bx, by = min(mouse[0] + 12, GW - w), min(mouse[1] + 12, WIN_H - h)
+        pygame.draw.rect(screen, PANEL2, (bx, by, w, h), border_radius=5)
+        pygame.draw.rect(screen, accent, (bx, by, w, h), 1, border_radius=5)
+        for i, ln in enumerate(lines):
+            text(ln, bx + 8, by + 6 + i * 16, F_S, INK if i else accent)
+
     PANEL_X = GW + 10
     running = True
     while running:
@@ -172,6 +247,38 @@ def main() -> None:  # pragma: no cover - needs a display
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
                 running = False
+            elif show_intro and ev.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+                show_intro = False  # any key/click dismisses the welcome overlay
+            elif ev.type == pygame.KEYDOWN and code_mode:
+                # the code editor captures all typing while open
+                if ev.key == pygame.K_ESCAPE:
+                    code_mode = False
+                elif (ev.mod & pygame.KMOD_CTRL) and ev.key == pygame.K_s:
+                    apply_code(code_buf.text())
+                elif (ev.mod & pygame.KMOD_CTRL) and ev.key == pygame.K_z:
+                    code_buf.undo()
+                elif ev.key == pygame.K_RETURN:
+                    code_buf.newline()
+                elif ev.key == pygame.K_BACKSPACE:
+                    code_buf.backspace()
+                elif ev.key == pygame.K_DELETE:
+                    code_buf.delete()
+                elif ev.key == pygame.K_LEFT:
+                    code_buf.left()
+                elif ev.key == pygame.K_RIGHT:
+                    code_buf.right()
+                elif ev.key == pygame.K_UP:
+                    code_buf.up()
+                elif ev.key == pygame.K_DOWN:
+                    code_buf.down()
+                elif ev.key == pygame.K_HOME:
+                    code_buf.home()
+                elif ev.key == pygame.K_END:
+                    code_buf.end()
+                elif ev.key == pygame.K_TAB:
+                    code_buf.insert("    ")
+                elif ev.unicode and ev.unicode.isprintable():
+                    code_buf.insert(ev.unicode)
             elif ev.type == pygame.KEYDOWN:
                 if ev.key == pygame.K_LEFTBRACKET:
                     switch_map(-1)
@@ -182,22 +289,40 @@ def main() -> None:  # pragma: no cover - needs a display
                     deploy_loadout()
                 elif ev.key == pygame.K_p:
                     world.paused = not world.paused
+                elif ev.key == pygame.K_PERIOD and world.paused and not world.over:
+                    world.step(1 / 60)  # single-step one tick while paused
                 elif ev.key == pygame.K_F5:
                     importlib.reload(loadout_mod)
                     deploy_loadout(refund_current=True)
                     say("Loadout reloaded from loadout.py")
                 elif ev.key == pygame.K_e:
                     edit_mode = not edit_mode
+                    if edit_mode:
+                        build_mode = False
+                elif ev.key == pygame.K_t:
+                    build_mode = not build_mode
+                    edge_src = None
+                    if build_mode:
+                        edit_mode = False
                 elif ev.key == pygame.K_m:
                     metrics_mode = not metrics_mode
                 elif ev.key == pygame.K_h:
                     help_mode = not help_mode
+                elif ev.key == pygame.K_c:
+                    try:
+                        with open(loadout_mod.__file__, encoding="utf-8") as fh:
+                            code_buf.set_text(fh.read())
+                    except OSError as err:
+                        code_buf.set_text(f"# could not read loadout.py: {err}\n")
+                    code_status["msg"] = ""
+                    code_scroll = 0
+                    code_mode = True
                 elif ev.key == pygame.K_s:
                     # save the current build to loadout.py so it loads next launch
                     try:
                         with open(loadout_mod.__file__, "w", encoding="utf-8") as fh:
-                            fh.write(editor.to_python())
-                        say("Saved build to loadout.py")
+                            fh.write(editor.to_python(world.map))
+                        say("Saved build + topology to loadout.py")
                     except OSError as err:
                         say(f"Save failed: {err}", ok=False)
                 elif ev.key == pygame.K_d:
@@ -208,16 +333,50 @@ def main() -> None:  # pragma: no cover - needs a display
                     say(f"difficulty: {world.difficulty} (run reset)")
                 elif ev.key == pygame.K_l:
                     ask_llm()
+                elif ev.key == pygame.K_f:
+                    speed = speed % 3 + 1  # 1x -> 2x -> 3x -> 1x
+                elif ev.key == pygame.K_k:
+                    sandbox = not sandbox  # practice mode: free credits
+                    credits = 100000 if sandbox else STARTING_CREDITS
+                    world = World(MAPS[MAP_LIST[map_i]].copy(),
+                                  difficulty=DIFFICULTY_LIST[difficulty_i],
+                                  starting_credits=credits)
+                    deploy_loadout(load_topology=False)
+                    say("sandbox ON — free credits to experiment" if sandbox
+                        else "sandbox off")
                 elif edit_mode and ev.key == pygame.K_g:
                     editor.select_gate()  # gate-placement mode
                 elif edit_mode and ev.key == pygame.K_b:
                     editor.select_limiter()  # quelimiter (buffer) placement mode
+                elif edit_mode and ev.key == pygame.K_x:
+                    for t in editor.to_turrets():    # clear all placements, refunded
+                        world.bank.earn(gun_cost(t.gun))
+                    for gt in editor.to_gates():
+                        world.bank.earn(gt.cost)
+                    for lm in editor.to_limiters():
+                        world.bank.earn(lm.cost)
+                    editor.clear()
+                    sync_world()
+                    say("cleared all placements (refunded)")
                 elif edit_mode and pygame.K_1 <= ev.key <= pygame.K_9:
                     guns = editor.available_guns()
                     idx = ev.key - pygame.K_1
                     if idx < len(guns):
                         editor.select_gun(guns[idx])
-            elif ev.type == pygame.MOUSEBUTTONDOWN and edit_mode:
+            elif ev.type == pygame.MOUSEWHEEL and code_mode:
+                code_scroll = max(0, code_scroll - ev.y * 3)  # scroll the code view
+            elif ev.type == pygame.MOUSEBUTTONDOWN and code_mode and ev.button == 1:
+                mx, my = ev.pos  # click to position the caret in the editor
+                top, left = 56, 52
+                r = code_scroll + (my - top) // 16
+                if my >= top and 0 <= r < len(code_buf.lines):
+                    code_buf.row = r
+                    ln = code_buf.lines[r]
+                    c = 0
+                    while c < len(ln) and left + F_S.size(ln[: c + 1])[0] <= mx:
+                        c += 1
+                    code_buf.col = c
+            elif ev.type == pygame.MOUSEBUTTONDOWN and edit_mode and not code_mode:
                 mx, my = ev.pos
                 if mx < GW:  # click on the playfield -> place / equip / remove
                     if ev.button == 1:
@@ -252,7 +411,7 @@ def main() -> None:  # pragma: no cover - needs a display
                             if kind in ("gun", "gate", "limiter"):
                                 drag_item = (kind, name)
                             break
-            elif ev.type == pygame.MOUSEBUTTONUP and ev.button == 1 and edit_mode:
+            elif ev.type == pygame.MOUSEBUTTONUP and ev.button == 1 and edit_mode and not code_mode:
                 if drag_item is not None:
                     mx, my = ev.pos
                     kind, _ = drag_item
@@ -265,15 +424,46 @@ def main() -> None:  # pragma: no cover - needs a display
                             editor.place_limiter(mx, my)
                         sync_world()
                     drag_item = None
+            elif (ev.type == pygame.MOUSEBUTTONDOWN and build_mode and not code_mode
+                  and ev.pos[0] < GW):
+                mx, my = ev.pos
+                picked = node_under(mx, my)
+                if ev.button == 1:
+                    if picked is None:                # empty space -> new node
+                        world.map.add_node(mx, my)
+                        topology_edited()
+                        say("added node")
+                    elif edge_src is None:            # first node of an edge
+                        edge_src = picked
+                    else:                             # second node -> draw the edge
+                        if world.map.add_edge(edge_src, picked):
+                            topology_edited()
+                            say(f"edge {edge_src} → {picked}")
+                        else:
+                            say("edge rejected (would loop, or duplicate)", ok=False)
+                        edge_src = None
+                elif ev.button == 3:                  # remove a node
+                    if picked is not None and world.map.remove_node(picked):
+                        topology_edited()
+                        say(f"removed {picked}")
+                    else:
+                        say("can't remove (source/sink or empty space)", ok=False)
+                    edge_src = None
 
         # keep the editor palette in step with what the current wave has unlocked
         editor.set_unlocked(world.unlocked())
 
-        if not world.paused and not world.over:
-            acc = dt
+        if not world.paused and not world.over and not code_mode and not show_intro:
+            acc = dt * speed  # fast-forward runs more sim time per frame
             while acc > 0:
                 world.step(min(1 / 60, acc))
                 acc -= 1 / 60
+        if world.wave_idx > prev_wave and not world.over:  # announce a wave clear
+            say(f"Wave {world.wave_idx} cleared!  +{world.wave_income(world.wave_idx)} credits")
+        prev_wave = world.wave_idx
+
+        coach = coaching(world)  # live advice; top one is shown, all listed in metrics
+        coach_c = {"danger": DANGER, "warn": AMBER, "tip": (130, 170, 255), "ok": PHOS}
 
         # ---- draw playfield ----
         screen.fill(BG)
@@ -281,9 +471,18 @@ def main() -> None:  # pragma: no cover - needs a display
             pygame.draw.line(screen, GRID, (x, 0), (x, WIN_H))
         for y in range(0, WIN_H, 40):
             pygame.draw.line(screen, GRID, (0, y), (GW, y))
-        # ---- topology: edges, then nodes with their queues ----
+        # ---- topology: edges (with a flow-direction arrow), then nodes ----
         for src, dst in world.map.edges():
-            pygame.draw.line(screen, (42, 66, 89), world.map.pos(src), world.map.pos(dst), 12)
+            ax, ay = world.map.pos(src)
+            bx, by = world.map.pos(dst)
+            pygame.draw.line(screen, (42, 66, 89), (ax, ay), (bx, by), 12)
+            dist = math.hypot(bx - ax, by - ay) or 1.0
+            ux, uy = (bx - ax) / dist, (by - ay) / dist  # unit + perpendicular
+            mx2, my2 = ax + (bx - ax) * 0.55, ay + (by - ay) * 0.55
+            tip = (mx2 + ux * 7, my2 + uy * 7)
+            b1 = (mx2 - ux * 3 - uy * 5, my2 - uy * 3 + ux * 5)
+            b2 = (mx2 - ux * 3 + uy * 5, my2 - uy * 3 - ux * 5)
+            pygame.draw.polygon(screen, (70, 100, 130), [tip, b1, b2])
         worst_node, worst_depth = None, 0  # the live bottleneck this frame
         for nid, node in world.map.nodes.items():
             q = world.queue_at(nid)
@@ -382,10 +581,39 @@ def main() -> None:  # pragma: no cover - needs a display
             pygame.draw.circle(screen, KINDS[p.kind]["color"],
                                (int(ax + (bx - ax) * f), int(ay + (by - ay) * f)), r)
 
-        if world.intermission > 0 and not world.over:
+        # build mode: ring every node, mark source/sink, draw the pending edge
+        if build_mode:
+            for nid in world.map.nodes:
+                nx, ny = (int(v) for v in world.map.pos(nid))
+                ring = GATE_C if nid in (world.map.source, world.map.sink) else PHOS
+                pygame.draw.circle(screen, ring, (nx, ny), 16, 1)
+                text(nid, nx + 10, ny + 6, F_S, MUTED)  # label so you can see what you connect
+            sx, sy = (int(v) for v in world.map.pos(world.map.source))
+            kx, ky = (int(v) for v in world.map.pos(world.map.sink))
+            text("src", sx - 9, sy + 18, F_S, GATE_C)
+            text("sink", kx - 12, ky + 18, F_S, GATE_C)
+            if edge_src is not None:
+                pygame.draw.line(screen, PHOS, world.map.pos(edge_src), mouse, 2)
+            text("BUILD MODE (T) — click empty = node · node→node = edge · RMB node = remove",
+                 12, 14, F_S, PHOS)
+
+        if world.intermission > 0 and not world.over and not build_mode:
             text(f"Wave {world.level} incoming...", GW // 2 - 70, 14, F_M, INK)
+            # preview the upcoming kinds with swatches so you can prep coverage
+            px = GW // 2 - 70
+            for k, n in world.upcoming_kinds().items():
+                pygame.draw.rect(screen, KINDS[k]["color"], (px, 40, 8, 8))
+                label = f"{k} x{n}"
+                text(label, px + 12, 38, F_S, INK)
+                px += 12 + F_S.size(label)[0] + 12
         text(f"map: {world.map.name}   [ ] to switch", 12, WIN_H - 22, F_S, MUTED)
-        text(f"mode: {world.difficulty}   D to cycle   ·   H for help", 12, WIN_H - 40, F_S, MUTED)
+        speed_txt = f"   speed x{speed} (F)" if speed > 1 else "   F to fast-forward"
+        sand_txt = "   · SANDBOX" if sandbox else ""
+        text(f"mode: {world.difficulty}   D to cycle{speed_txt}{sand_txt}   ·   H for help",
+             12, WIN_H - 40, F_S, PHOS if sandbox else MUTED)
+        # live coach: the single most important thing to fix right now
+        if coach and not build_mode and not code_mode and not world.over:
+            text("COACH: " + coach[0].text, 12, WIN_H - 78, F_S, coach_c[coach[0].level])
         # transient action feedback (save/reload/over-budget/difficulty), always visible
         if toast["ttl"] > 0:
             toast["ttl"] -= dt
@@ -414,24 +642,31 @@ def main() -> None:  # pragma: no cover - needs a display
         # per-kind table
         text("KIND        in  ok  leak  now", PANEL_X, 100, F_S, MUTED)
         row = 118
+        gap_kinds = world.coverage_gaps()
         for k, s in world.stats.items():
             if s.spawned == 0:
                 continue
             pygame.draw.rect(screen, KINDS[k]["color"], (PANEL_X, row + 2, 8, 8))
-            line = f"{k:<10} {s.spawned:>3} {s.handled:>3} {s.leaked:>4} {s.inflight:>4}"
-            text(line, PANEL_X + 14, row, F_S, INK if s.leaked == 0 else DANGER)
+            gap = k in gap_kinds
+            mark = "!" if gap else " "  # uncovered kinds flagged before they pile up
+            line = f"{mark}{k:<9} {s.spawned:>3} {s.handled:>3} {s.leaked:>4} {s.inflight:>4}"
+            text(line, PANEL_X + 14, row, F_S, DANGER if (gap or s.leaked) else INK)
             row += 18
 
         row += 8
         text("UNLOCKED: " + ", ".join(sorted(world.unlocked())), PANEL_X, row, F_S, MUTED)
-        row += 26
+        row += 18
+        syns = active_synergies(world.turrets)
+        if syns:
+            text("SYNERGY: " + ", ".join(s.name for s in syns), PANEL_X, row, F_S, PHOS)
+        row += 18
 
         panel_w = WIN_W - PANEL_X - 14
         palette_hits.clear()
         if edit_mode:
             text("EDIT MODE — E to exit", PANEL_X, row, F_S, PHOS)
             row += 18
-            text("click+place / drag to map · LMB turret=equip · RMB remove",
+            text("drag/click place · LMB turret=equip · RMB remove · X clear all",
                  PANEL_X, row, F_S, MUTED)
             row += 20
             text("GUNS  (click/drag or 1-9; swatches = kinds)", PANEL_X, row, F_S, MUTED)
@@ -487,7 +722,11 @@ def main() -> None:  # pragma: no cover - needs a display
             for i, ln in enumerate(wrap(llm_state["text"], panel_w - 26, F_S)[:7]):
                 text(ln, PANEL_X + 10, row + 28 + i * 16, F_S, INK)
 
-        # tooltip on top of everything
+        # hover tooltips (turret > gate > limiter > node), on top of everything
+        hovered_node = node_under(mouse[0], mouse[1]) if mouse[0] < GW else None
+        hovered_gate = next((g for g in world.gates if g.node == hovered_node), None)
+        hovered_limiter = next((m for m in world.limiters if m.node == hovered_node), None)
+
         if hovered_turret is not None:
             g = hovered_turret.gun
             lines = [
@@ -503,13 +742,37 @@ def main() -> None:  # pragma: no cover - needs a display
             if g.modules:
                 lines.append("modules: " + ", ".join(m.name for m in g.modules))
             lines.append(f"cost {gun_cost(g)}cr")
-            w = max(F_S.size(s)[0] for s in lines) + 16
-            h = len(lines) * 16 + 10
-            bx, by = min(mouse[0] + 12, GW - w), mouse[1] + 12
-            pygame.draw.rect(screen, PANEL2, (bx, by, w, h), border_radius=5)
-            pygame.draw.rect(screen, PHOS, (bx, by, w, h), 1, border_radius=5)
-            for i, ln in enumerate(lines):
-                text(ln, bx + 8, by + 6 + i * 16, F_S, INK if i else PHOS)
+            tooltip(lines)
+        elif hovered_gate is not None:
+            outs = world.map.branches(hovered_gate.node)
+            lines = [f"{hovered_gate.id}: gate @ {hovered_gate.node}", "routes by kind:"]
+            for i, bnode in enumerate(outs):
+                routed = [k for k, idx in hovered_gate.routes.items() if idx == i]
+                lines.append(f"  -> {bnode}: {', '.join(routed) if routed else '(none)'}")
+            tooltip(lines, GATE_C)
+        elif hovered_limiter is not None:
+            buffered = [p for p in world.queue_at(hovered_limiter.node)
+                        if not world.serves(hovered_limiter.node, p.kind)]
+            tooltip([f"{hovered_limiter.id}: quelimiter @ {hovered_limiter.node}",
+                     f"release {hovered_limiter.release_rate:.0f}/s",
+                     f"buffered {len(buffered)}/{hovered_limiter.buffer_cap}"], AMBER)
+        elif hovered_node is not None:
+            q = world.queue_at(hovered_node)
+            cap = (world.limiter_at(hovered_node).buffer_cap  # type: ignore[union-attr]
+                   if world.limiter_at(hovered_node) else QUEUE_CAP)
+            served: set[str] = set()
+            tput = 0.0
+            for t in world.turrets:
+                if t.node == hovered_node:
+                    served |= t.accepts()
+                    tput += t.dps()
+            role = ("source" if hovered_node == world.map.source else
+                    "sink" if hovered_node == world.map.sink else "node")
+            node_lines = [f"{role} {hovered_node}", f"queue {len(q)}/{cap}",
+                          "serves: " + (", ".join(sorted(served)) if served else "(pass-through)")]
+            if tput:
+                node_lines.append(f"throughput {tput:.0f}/s")
+            tooltip(node_lines, INK)
 
         # ---- help overlay (toggle H): controls + kind/gun legend ----
         if help_mode and not world.over:
@@ -520,10 +783,11 @@ def main() -> None:  # pragma: no cover - needs a display
             controls = [
                 ("[ ]", "previous / next map"), ("E", "placement editor"),
                 ("G", "gate router (in editor)"), ("B", "quelimiter (in editor)"),
-                ("M", "metrics dashboard"),
+                ("T", "build mode (edit topology)"), ("C", "edit loadout.py in-app"),
+                ("K", "sandbox (free credits)"), ("M", "metrics dashboard"),
                 ("S", "save build to loadout.py"), ("D", "cycle difficulty"),
-                ("P", "pause"), ("R", "reset"), ("F5", "reload loadout.py"),
-                ("L", "local-LLM help"),
+                ("P", "pause"), ("R", "reset"), ("F", "fast-forward (1/2/3x)"),
+                ("F5", "reload loadout.py"), ("L", "local-LLM help"),
             ]
             text("CONTROLS", 24, 52, F_S, MUTED)
             yy = 70
@@ -600,22 +864,102 @@ def main() -> None:  # pragma: no cover - needs a display
                 pygame.draw.line(screen, PHOS, a, b, 1)
             eff = tel.efficiency(world)
             text(f"cost / handled: {eff['cost_per_handled']:.0f}cr", 24, yy + 52, F_S, INK)
+            # coach: everything worth fixing, not just the top line
+            text("COACH", 360, 56, F_S, MUTED)
+            for i, h in enumerate(coach):
+                for j, ln in enumerate(wrap(h.text, GW - 380, F_S)):
+                    text(("- " if j == 0 else "  ") + ln, 360, 76 + i * 34 + j * 16,
+                         F_S, coach_c[h.level])
 
-        if world.over:
+        # in-app code editor (toggle C): edit loadout.py, Ctrl+S to apply
+        if code_mode:
+            ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+            ov.fill((6, 10, 16, 246))
+            screen.blit(ov, (0, 0))
+            text("CODE — loadout.py   Ctrl+S apply · Ctrl+Z undo · click/scroll · Esc close",
+                 16, 12, F_S, PHOS)
+            if code_status["msg"]:
+                ok = not code_status["msg"].startswith("error")
+                text(code_status["msg"], 16, 34, F_S, PHOS if ok else DANGER)
+            line_h, top = 16, 56
+            avail = (WIN_H - top - 16) // line_h
+            # mouse-wheel scroll, but always keep the caret line in view
+            if code_buf.row < code_scroll:
+                code_scroll = code_buf.row
+            elif code_buf.row >= code_scroll + avail:
+                code_scroll = code_buf.row - avail + 1
+            code_scroll = max(0, min(code_scroll, max(0, len(code_buf.lines) - avail)))
+            first = code_scroll
+            syntax_c = {"kw": (130, 170, 255), "num": AMBER, "comment": MUTED}
+            for i in range(first, min(len(code_buf.lines), first + avail)):
+                y = top + (i - first) * line_h
+                text(f"{i + 1:>3}", 16, y, F_S, MUTED)
+                cx = 52
+                for tok, kind in code_spans(code_buf.lines[i]):  # syntax highlighting
+                    text(tok, cx, y, F_S, syntax_c.get(kind, INK))
+                    cx += F_S.size(tok)[0]
+                if i == code_buf.row:  # caret
+                    cx = 52 + F_S.size(code_buf.lines[i][: code_buf.col])[0]
+                    pygame.draw.line(screen, PHOS, (cx, y), (cx, y + 14), 1)
+
+        if not world.over:
+            end_score["saved"] = False  # arm scoring for the next game-over
+
+        if world.paused and not world.over and not code_mode:
+            text("|| PAUSED — P resume · . step one tick", GW // 2 - 130, 36, F_M, AMBER)
+
+        if world.over and not code_mode:
+            if not end_score["saved"]:  # record the score once, persist the best
+                end_score["score"] = world.score()
+                end_score["best"] = save_highscore(HISCORE_PATH, end_score["score"])
+                end_score["saved"] = True
             ov = pygame.Surface((GW, WIN_H), pygame.SRCALPHA)
             ov.fill((8, 14, 22, 210))
             screen.blit(ov, (0, 0))
             msg = "PIPELINE HELD" if world.won else "PIPELINE OVERWHELMED"
-            text(msg, GW // 2 - 110, 60, F_L, PHOS if world.won else DANGER)
+            text(msg, GW // 2 - 110, 56, F_L, PHOS if world.won else DANGER)
+            text(f"score {end_score['score']}    best {end_score['best']}",
+                 GW // 2 - 90, 90, F_M, INK)
+            handled = sum(s.handled for s in world.stats.values())
+            leaked = sum(s.leaked for s in world.stats.values())
+            text(f"waves cleared {world.wave_idx}   ·   handled {handled}   ·   "
+                 f"leaked {leaked}", GW // 2 - 150, 112, F_S, MUTED)
             if not world.won:
                 # incident post-mortem: what failed, on which kinds and nodes
                 deb = summarize_failure(world)
-                text(deb.cause, 40, 100, F_S, INK)
-                text("WHERE IT BROKE", 40, 132, F_S, MUTED)
+                text(deb.cause, 40, 138, F_S, INK)
+                text("WHERE IT BROKE", 40, 164, F_S, MUTED)
                 for i, ln in enumerate(deb.lines[:6]):
-                    text("- " + ln, 48, 152 + i * 18, F_S, DANGER)
+                    text("- " + ln, 48, 184 + i * 18, F_S, DANGER)
             text("Press R to retry, or edit loadout.py and F5.",
                  GW // 2 - 150, WIN_H - 80, F_S, INK)
+
+        # welcome / walkthrough overlay (shown once at launch)
+        if show_intro:
+            ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+            ov.fill((8, 14, 22, 238))
+            screen.blit(ov, (0, 0))
+            intro = [
+                ("CHOKEPOINT", F_L, PHOS),
+                ("A pipeline of typed alerts floods toward the exit.", F_M, INK),
+                ("Turrets are consumers: each only processes the alert kinds its", F_S, INK),
+                ("gun accepts. Place them where alerts queue, and cover every kind.", F_S, INK),
+                ("", F_S, INK),
+                ("You lose two ways: uncovered kinds LEAK, and queues that back", F_S, INK),
+                ("up too long bleed your HEALTH (latency). Build for both.", F_S, INK),
+                ("", F_S, INK),
+                ("E  build & place turrets / gates (G) / limiters (B)", F_S, PHOS),
+                ("T  design the topology     C  edit the loadout code", F_S, PHOS),
+                ("M  metrics & coaching      H  full controls + legend", F_S, PHOS),
+                ("", F_S, INK),
+                ("The COACH line (bottom-left) always tells you what to fix next.", F_S, AMBER),
+                ("", F_S, INK),
+                ("press any key to start", F_M, MUTED),
+            ]
+            y = 90
+            for txt, fnt, col in intro:
+                text(txt, WIN_W // 2 - fnt.size(txt)[0] // 2, y, fnt, col)
+                y += fnt.get_height() + 6
 
         pygame.display.flip()
 

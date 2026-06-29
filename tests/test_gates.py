@@ -102,6 +102,24 @@ def test_autoroute_on_delta_splits_kinds_across_lanes():
     assert routes["dns"] == routes["auth"]         # same consumer, same lane
 
 
+def test_delta_gate_routes_both_kinds_and_both_get_handled():
+    # end-to-end: a gate splits auth (top) and cloudtrail (bottom) to lanes whose
+    # turrets handle them, and both are processed (not leaked).
+    from chokepoint.maps import MAPS
+    w = World(MAPS["delta"])
+    w.set_turrets([Turret(340, 180, make_gun("sieve")),       # top lane: auth/dns
+                   Turret(340, 500, make_gun("auditor"))])     # bottom lane: cloudtrail
+    w.set_gates([Gate(180, 340)])
+    w.autoroute()
+    w.spawn_q = sorted([(i * 0.3, "auth") for i in range(6)]
+                       + [(i * 0.3 + 0.1, "cloudtrail") for i in range(6)])
+    w.spawn_clock = 0.0
+    w.started = True
+    step_for(w, 40)
+    assert w.stats["auth"].handled > 0
+    assert w.stats["cloudtrail"].handled > 0
+
+
 def test_trident_is_a_three_way_fork_routed_to_distinct_lanes():
     from chokepoint.maps import MAPS
     gm = MAPS["trident"]

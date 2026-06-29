@@ -104,6 +104,13 @@ class World:
     def limiter_at(self, node_id: str) -> Limiter | None:
         return next((lim for lim in self.limiters if lim.node == node_id), None)
 
+    def rebind(self) -> None:
+        """Re-snap all placed devices to the current nodes (after a topology edit)."""
+        self.set_turrets(self.turrets)
+        self.set_gates(self.gates)
+        self.set_limiters(self.limiters)
+        self.autoroute()
+
     def autoroute(self) -> None:
         """Content-based routing: point each gate's kinds at the first branch
         that reaches a turret accepting them. Recompute after turret/gate edits.
@@ -159,6 +166,18 @@ class World:
     @property
     def level(self) -> int:
         return self.wave_idx + 1
+
+    def score(self) -> int:
+        """A run score: alerts handled plus a bonus for each wave cleared."""
+        handled = sum(s.handled for s in self.stats.values())
+        return handled + 50 * self.wave_idx
+
+    def upcoming_kinds(self) -> dict[str, int]:
+        """Counts of each kind still queued to spawn (the upcoming wave preview)."""
+        counts: dict[str, int] = {}
+        for _, kind in self.spawn_q:
+            counts[kind] = counts.get(kind, 0) + 1
+        return counts
 
     def unlocked(self) -> set[str]:
         return unlocked_at(self.wave_idx)

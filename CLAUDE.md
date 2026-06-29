@@ -44,8 +44,15 @@ limiter.py     Limiter (quelimiter) — placed on a node; buffers a burst (large
 metrics.py     Telemetry — pure observability backend. World feeds it events +
                per-wave samples; aggregates KindFlow/NodeLoad/Latency(Histogram)/
                Trend/Efficiency. summarize_failure() -> incident post-mortem.
+hints.py       coaching(world) -> prioritized, actionable Hints (the in-game
+               coach): names the gun/module to fix a gap, flags bottlenecks, etc.
+scores.py      load/save_highscore — tiny stdlib persistence, never raises.
+codebuffer.py  TextBuffer — pure text buffer (cursor, edit ops, undo) for the
+               in-app code editor.
+syntax.py      spans(line) -> tokens for editor highlighting. Pure.
 maps.py        Graph topology: Node + directed adj, source/sink, edge_len,
-               nearest_node. Phase-1 maps are single trunks (linear chains).
+               nearest_node, and editing (add/remove node/edge, cycle-checked,
+               copy()). Built-in maps incl. branching (delta/trident/cascade).
 simulation.py  World.step() — flow network: packets queue at nodes, turrets
                drain the queue they're bound to; dual failure (overflow/sink
                LOSS -> leaks, dwell LATENCY -> health). Owns Bank + wave income.
@@ -53,14 +60,16 @@ simulation.py  World.step() — flow network: packets queue at nodes, turrets
 editor.py      ArsenalEditor — pure placement/economy state machine: select/queue,
                place/equip/remove by click coords, seed_purchase a loadout. Tested.
 loadout.py     build_loadout(unlocked, slots) -> [Turret]. The player edits this.
-render.py      pygame: draw, tooltips, map switch, F5 hot-reload, L = LLM help,
-               E = in-game placement editor (drives ArsenalEditor).
+render.py      pygame (the only module with it): draw, tooltips, overlays, the
+               editor (E), build mode (T), in-app code editor (C), metrics (M),
+               help (H), coach line, sandbox (K), speed (F), scoring.
 llm_assist.py  optional local-LLM diagnostics over stdlib urllib; degrades to a
                friendly message if no model is running. localhost only.
 ```
 
-Dependency direction: packets/arsenal/maps → economy → simulation →
-(editor, loadout, llm_assist) → render.
+Dependency direction: packets/arsenal/maps → economy/gates/limiter → simulation
+→ metrics/hints/editor/loadout/llm_assist → render. codebuffer/syntax/scores are
+leaf helpers used by render.
 
 ## Invariants — keep these true
 

@@ -80,3 +80,38 @@ def test_inbox_correlation_synergy():
     b = Turret(0, 0, make_gun("sieve"), id="T2")
     mult = compute_synergy_mult([a, b])
     assert mult["T1"] > 1.0 and mult["T2"] > 1.0
+
+
+def test_new_guns_cover_their_kinds():
+    assert "waf" in make_gun("bastion").accepts
+    assert "vuln" in make_gun("sentinel").accepts
+    assert {"auth", "cloudtrail"} <= make_gun("correlator").accepts
+
+
+def test_new_adapters_and_boost():
+    gun = make_gun("scatter")
+    gun.attach(MODULE_LIBRARY["adapter_waf"])
+    assert "waf" in gun.effective_accepts()
+    g2 = make_gun("scatter")
+    g2.attach(MODULE_LIBRARY["adapter_cloudtrail"])
+    g2.attach(MODULE_LIBRARY["adapter_vuln"])
+    assert {"cloudtrail", "vuln"} <= g2.effective_accepts()
+    base = make_gun("scatter").effective_damage()
+    boosted = make_gun("scatter")
+    boosted.attach(MODULE_LIBRARY["boost"])
+    assert boosted.effective_damage() > base
+
+
+def test_perimeter_sweep_synergy():
+    a = Turret(0, 0, make_gun("bastion"), id="T1")
+    b = Turret(0, 0, make_gun("sentinel"), id="T2")
+    mult = compute_synergy_mult([a, b])
+    assert mult["T1"] > 1.0 and mult["T2"] > 1.0
+
+
+def test_active_synergies_lists_present_pairs():
+    from chokepoint.arsenal import active_synergies
+    turrets = [Turret(0, 0, make_gun("sieve")), Turret(0, 0, make_gun("auditor"))]
+    names = [s.name for s in active_synergies(turrets)]
+    assert "Correlation" in names
+    assert active_synergies([Turret(0, 0, make_gun("sieve"))]) == []

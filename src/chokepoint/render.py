@@ -59,6 +59,7 @@ from .simulation import (
     World,
 )
 from .syntax import spans as code_spans
+from .tutorial import Tutorial
 
 QUEUE_WARN = QUEUE_CAP - 2  # queue depth at which a node's marker turns red
 
@@ -95,8 +96,8 @@ async def main() -> None:  # pragma: no cover - needs a display
     PANEL = (19, 31, 46)
     PANEL2 = (11, 19, 32)
     GRID = (28, 44, 62)
-    INK = (199, 213, 224)
-    MUTED = (94, 116, 136)
+    INK = (226, 236, 244)   # brighter than before for legibility on the dark UI
+    MUTED = (150, 170, 188)
     PHOS = (56, 225, 176)
     DANGER = (229, 85, 110)
     GATE_C = (240, 200, 120)
@@ -118,7 +119,9 @@ async def main() -> None:  # pragma: no cover - needs a display
     code_buf = TextBuffer()
     code_status: dict[str, str] = {"msg": ""}
     code_scroll = 0              # first visible line in the editor (mouse-wheel scroll)
-    show_intro = True            # one-time welcome/walkthrough overlay
+    tutorial = Tutorial()        # guided onboarding; freezes the sim until done/skipped
+    tut_next: Any = None         # Rect of the on-screen Next/Start button (set while drawing)
+    tut_skip: Any = None         # Rect of the Skip button
     speed = 1                    # sim speed multiplier (F cycles 1x/2x/3x)
     sandbox = False              # practice mode: free credits to experiment (K)
     prev_wave = 0                # to announce wave clears
@@ -288,8 +291,12 @@ async def main() -> None:  # pragma: no cover - needs a display
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
                 running = False
-            elif show_intro and ev.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
-                show_intro = False  # any key/click dismisses the welcome overlay
+            elif (tutorial.active and ev.type == pygame.MOUSEBUTTONDOWN
+                  and tut_next is not None and tut_next.collidepoint(ev.pos)):
+                tutorial.next()     # the Next/Start button advances a manual step
+            elif (tutorial.active and ev.type == pygame.MOUSEBUTTONDOWN
+                  and tut_skip is not None and tut_skip.collidepoint(ev.pos)):
+                tutorial.skip()     # other clicks fall through, so building still works
             elif ev.type == pygame.KEYDOWN and code_mode:
                 # the code editor captures all typing while open
                 if ev.key == pygame.K_ESCAPE:
@@ -340,6 +347,7 @@ async def main() -> None:  # pragma: no cover - needs a display
                     edit_mode = not edit_mode
                     if edit_mode:
                         build_mode = False
+                        tutorial.signal("edit")
                 elif ev.key == pygame.K_t:
                     build_mode = not build_mode
                     edge_src = None
@@ -358,6 +366,7 @@ async def main() -> None:  # pragma: no cover - needs a display
                     code_status["msg"] = ""
                     code_scroll = 0
                     code_mode = True
+                    tutorial.signal("code")
                 elif ev.key == pygame.K_s:
                     # save the current build to loadout.py so it loads next launch
                     try:
@@ -493,8 +502,10 @@ async def main() -> None:  # pragma: no cover - needs a display
 
         # keep the editor palette in step with what the current wave has unlocked
         editor.set_unlocked(world.unlocked())
+        if tutorial.active:
+            tutorial.maybe_advance(world, editor)  # advance any state-gated step
 
-        if not world.paused and not world.over and not code_mode and not show_intro:
+        if not world.paused and not world.over and not code_mode and not tutorial.active:
             acc = dt * speed  # fast-forward runs more sim time per frame
             while acc > 0:
                 world.step(min(1 / 60, acc))
@@ -1016,32 +1027,39 @@ async def main() -> None:  # pragma: no cover - needs a display
             text("Press R to retry, or edit loadout.py and F5.",
                  GW // 2 - 150, WIN_H - 80, F_S, INK)
 
-        # welcome / walkthrough overlay (shown once at launch)
-        if show_intro:
-            ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
-            ov.fill((8, 14, 22, 238))
-            screen.blit(ov, (0, 0))
-            intro = [
-                ("CHOKEPOINT", F_L, PHOS),
-                ("A pipeline of typed alerts floods toward the exit.", F_M, INK),
-                ("Turrets are consumers: each only processes the alert kinds its", F_S, INK),
-                ("gun accepts. Place them where alerts queue, and cover every kind.", F_S, INK),
-                ("", F_S, INK),
-                ("You lose two ways: uncovered kinds LEAK, and queues that back", F_S, INK),
-                ("up too long bleed your HEALTH (latency). Build for both.", F_S, INK),
-                ("", F_S, INK),
-                ("E  build & place turrets / gates (G) / limiters (B)", F_S, PHOS),
-                ("T  design the topology     C  edit the loadout code", F_S, PHOS),
-                ("M  metrics & coaching      H  full controls + legend", F_S, PHOS),
-                ("", F_S, INK),
-                ("The COACH line (bottom-left) always tells you what to fix next.", F_S, AMBER),
-                ("", F_S, INK),
-                ("press any key to start", F_M, MUTED),
-            ]
-            y = 90
-            for txt, fnt, col in intro:
-                text(txt, WIN_W // 2 - fnt.size(txt)[0] // 2, y, fnt, col)
-                y += fnt.get_height() + 6
+        # guided tutorial: a card over the playfield with Next/Skip buttons
+        tut_next = tut_skip = None
+        if tutorial.active and tutorial.step is not None:
+            step = tutorial.step
+            # dim the playfield a little so the card reads, but stays visible behind it
+            shade = pygame.Surface((GW, WIN_H), pygame.SRCALPHA)
+            shade.fill((8, 14, 22, 150))
+            screen.blit(shade, (0, 0))
+            bw = min(760, GW - 40)
+            line_h = F_S.get_height() + 5
+            bh = 52 + len(step.body) * line_h + 40
+            bx, by = (GW - bw) // 2, (WIN_H - bh) // 2
+            pygame.draw.rect(screen, PANEL2, (bx, by, bw, bh), border_radius=8)
+            pygame.draw.rect(screen, PHOS, (bx, by, bw, bh), 2, border_radius=8)
+            idx = tutorial.script.index(step) + 1
+            text(f"Step {idx}/{len(tutorial.script)}", bx + bw - 92, by + 12, F_S, MUTED)
+            text(step.title, bx + 18, by + 12, F_M, PHOS)
+            ty = by + 44
+            for ln in step.body:
+                text(ln, bx + 18, ty, F_S, INK)
+                ty += line_h
+            # buttons: Skip always; Next/Start only when the step is a manual one
+            tut_skip = pygame.Rect(bx + 18, by + bh - 34, 70, 24)
+            pygame.draw.rect(screen, MUTED, tut_skip, 1, border_radius=4)
+            text("Skip", tut_skip.x + 16, tut_skip.y + 4, F_S, MUTED)
+            if step.is_manual:
+                label = step.button
+                tut_next = pygame.Rect(bx + bw - 130, by + bh - 34, 112, 24)
+                pygame.draw.rect(screen, PHOS, tut_next, border_radius=4)
+                text(f"{label}  >", tut_next.x + 14, tut_next.y + 4, F_S, PANEL2)
+            else:
+                text("(do the action above to continue)", bx + bw - 280, by + bh - 30,
+                     F_S, AMBER)
 
         pygame.display.flip()
         await asyncio.sleep(0)  # yield to the browser event loop (no-op cost on desktop)

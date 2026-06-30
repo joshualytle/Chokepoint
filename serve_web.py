@@ -28,12 +28,15 @@ CDN_BASE = "https://pygame-web.github.io/cdn/"
 
 
 # pygame-web's runtime aborts with "unsupported device pixel ratio" on fractional
-# ratios (Windows display scaling -> 1.25/1.5, phones -> 2.6/3). Pinning DPR to 1
-# before the runtime script runs makes the build load on any display. Injected as
-# the first tag so it executes before pygbag's deferred loader reads the value.
+# ratios (Windows display scaling -> 1.25/1.5, phones -> 2.6/3). Snapping the
+# ratio to a supported integer (2 on any hi-DPI display, else 1) BEFORE the
+# runtime reads it both avoids the abort and lets it render at 2x and downscale,
+# which is crisp on a scaled display (forcing 1 made text soft). Injected as the
+# first tag so it runs before pygbag's deferred loader.
 DPR_SHIM = (
-    b"<script>try{Object.defineProperty(window,'devicePixelRatio',"
-    b"{configurable:true,get:function(){return 1;}});}catch(e){}</script>\n"
+    b"<script>try{var _r=window.devicePixelRatio||1,_s=_r>1?2:1;"
+    b"Object.defineProperty(window,'devicePixelRatio',"
+    b"{configurable:true,get:function(){return _s;}});}catch(e){}</script>\n"
 )
 
 

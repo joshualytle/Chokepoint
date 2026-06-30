@@ -47,9 +47,10 @@ SCRIPT: list[Step] = [
     Step("Open Build mode", [
         "Let's add a worker. Press  E  to open Build mode.",
     ], event="edit"),
-    Step("Place a turret", [
-        "In the left panel, click a GUN — its colored squares are the types it handles.",
-        "Then click a NODE on the map to place it. Right-click removes it.",
+    Step("Pick a gun, then place it", [
+        "On the RIGHT panel, under GUNS, CLICK a gun to select it (it highlights).",
+        "A gun's colored squares show the alert types it can handle.",
+        "Then CLICK a node on the line to drop the turret there. Right-click removes it.",
         "Place one, then click Next.",
     ]),
     Step("Read the dashboard", [

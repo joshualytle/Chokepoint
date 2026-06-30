@@ -164,6 +164,13 @@ def _linear(name: str, pts: list[tuple[float, float]],
 
 
 MAPS: dict[str, Graph] = {
+    # the default: a clean, single straight trunk — easiest to read while learning.
+    # Build branches/gates onto it in Build mode (T) once you're comfortable.
+    "trunk": _linear(
+        "trunk",
+        [(-30, 300), (180, 300), (370, 300), (560, 300), (760, 300)],
+        slots=[(180, 365), (370, 365), (560, 365)],
+    ),
     "switchback": _linear(
         "switchback",
         [(-30, 140), (200, 140), (200, 420), (440, 420),

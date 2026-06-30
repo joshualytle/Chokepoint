@@ -125,6 +125,7 @@ async def main() -> None:  # pragma: no cover - needs a display
     speed = 1                    # sim speed multiplier (F cycles 1x/2x/3x)
     sandbox = False              # practice mode: free credits to experiment (K)
     prev_wave = 0                # to announce wave clears
+    awaiting_start = True        # paused before each wave so you can prep; P/SPACE begins
     HISCORE_PATH = "chokepoint_highscore.txt"
     end_score = {"saved": False, "score": 0, "best": load_highscore(HISCORE_PATH)}
     # palette rows registered each frame so panel clicks can be mapped to actions:
@@ -228,11 +229,12 @@ async def main() -> None:  # pragma: no cover - needs a display
         say("loadout applied from editor")
 
     def switch_map(delta: int) -> None:
-        nonlocal map_i, world, edit_mode
+        nonlocal map_i, world, edit_mode, awaiting_start
         map_i = (map_i + delta) % len(MAP_LIST)
         world = World(MAPS[MAP_LIST[map_i]].copy(), difficulty=DIFFICULTY_LIST[difficulty_i])
         edit_mode = False
         deploy_loadout(load_topology=False)  # an explicit map choice ignores the saved one
+        awaiting_start = True               # start the new map paused on its wave preview
 
     def ask_llm() -> None:
         llm_state["status"] = "thinking"
@@ -335,8 +337,13 @@ async def main() -> None:  # pragma: no cover - needs a display
                 elif ev.key == pygame.K_r:
                     world.reset()
                     deploy_loadout()
-                elif ev.key == pygame.K_p:
-                    world.paused = not world.paused
+                    awaiting_start = True
+                elif ev.key in (pygame.K_p, pygame.K_SPACE):
+                    if awaiting_start:
+                        awaiting_start = False   # begin the pending wave
+                        world.paused = False
+                    else:
+                        world.paused = not world.paused
                 elif ev.key == pygame.K_PERIOD and world.paused and not world.over:
                     world.step(1 / 60)  # single-step one tick while paused
                 elif ev.key == pygame.K_F5:
@@ -380,6 +387,7 @@ async def main() -> None:  # pragma: no cover - needs a display
                     world.difficulty = DIFFICULTY_LIST[difficulty_i]
                     world.reset()
                     deploy_loadout()
+                    awaiting_start = True
                     say(f"difficulty: {world.difficulty} (run reset)")
                 elif ev.key == pygame.K_l:
                     ask_llm()
@@ -392,6 +400,7 @@ async def main() -> None:  # pragma: no cover - needs a display
                                   difficulty=DIFFICULTY_LIST[difficulty_i],
                                   starting_credits=credits)
                     deploy_loadout(load_topology=False)
+                    awaiting_start = True
                     say("sandbox ON — free credits to experiment" if sandbox
                         else "sandbox off")
                 elif edit_mode and ev.key == pygame.K_g:
@@ -504,6 +513,8 @@ async def main() -> None:  # pragma: no cover - needs a display
         editor.set_unlocked(world.unlocked())
         if tutorial.active:
             tutorial.maybe_advance(world, editor)  # advance any state-gated step
+        if awaiting_start:
+            world.paused = True   # hold on the wave preview until the player begins
 
         if not world.paused and not world.over and not code_mode and not tutorial.active:
             acc = dt * speed  # fast-forward runs more sim time per frame
@@ -512,6 +523,7 @@ async def main() -> None:  # pragma: no cover - needs a display
                 acc -= 1 / 60
         if world.wave_idx > prev_wave and not world.over:  # announce a wave clear
             say(f"Wave {world.wave_idx} cleared!  +{world.wave_income(world.wave_idx)} credits")
+            awaiting_start = True   # prep pause: build/adjust before starting the next wave
         prev_wave = world.wave_idx
 
         coach = coaching(world)  # live advice; top one is shown, all listed in metrics
@@ -559,6 +571,8 @@ async def main() -> None:  # pragma: no cover - needs a display
         if worst_node is not None and worst_depth > QUEUE_WARN:
             pygame.draw.circle(screen, DANGER, worst_node, 22, 2)
             text("BOTTLENECK", worst_node[0] - 34, worst_node[1] + 24, F_S, DANGER)
+            text("more/faster turrets here, or a limiter (B)",
+                 worst_node[0] - 110, worst_node[1] + 40, F_S, AMBER)
 
         hovered_turret = None
         for t in world.turrets:
@@ -662,15 +676,21 @@ async def main() -> None:  # pragma: no cover - needs a display
             text("BUILD MODE (T) — click empty = node · node→node = edge · RMB node = remove",
                  12, 14, F_S, PHOS)
 
-        if world.intermission > 0 and not world.over and not build_mode:
-            text(f"Wave {world.level} incoming...", GW // 2 - 70, 14, F_M, INK)
+        if ((world.intermission > 0 or awaiting_start) and not world.over
+                and not build_mode and not tutorial.active):
+            title = (f"Wave {world.level} ready — press  P  or  SPACE  to begin"
+                     if awaiting_start else f"Wave {world.level} incoming...")
+            text(title, GW // 2 - F_M.size(title)[0] // 2, 12, F_M,
+                 AMBER if awaiting_start else INK)
             # preview the upcoming kinds with swatches so you can prep coverage
-            px = GW // 2 - 70
-            for k, n in world.upcoming_kinds().items():
+            preview = list(world.upcoming_kinds().items())
+            labels = [f"{k} x{n}" for k, n in preview]
+            total_w = sum(20 + F_S.size(s)[0] for s in labels)
+            px = GW // 2 - total_w // 2
+            for (k, _n), label in zip(preview, labels, strict=True):
                 pygame.draw.rect(screen, KINDS[k]["color"], (px, 40, 8, 8))
-                label = f"{k} x{n}"
                 text(label, px + 12, 38, F_S, INK)
-                px += 12 + F_S.size(label)[0] + 12
+                px += 20 + F_S.size(label)[0]
         text(f"map: {world.map.name}   [ ] to switch", 12, WIN_H - 22, F_S, MUTED)
         speed_txt = f"   speed x{speed} (F)" if speed > 1 else "   F to fast-forward"
         sand_txt = "   · SANDBOX" if sandbox else ""
@@ -734,17 +754,30 @@ async def main() -> None:  # pragma: no cover - needs a display
             text("drag/click place · LMB turret=equip · RMB remove · X clear all",
                  PANEL_X, row, F_S, MUTED)
             row += 20
-            text("GUNS  (click/drag or 1-9; swatches = kinds)", PANEL_X, row, F_S, MUTED)
+            text("GUNS — click one, then click the line to place it", PANEL_X, row, F_S, AMBER)
+            row += 17
+            text("(colored squares = the alert types it handles)", PANEL_X, row, F_S, MUTED)
             row += 17
             for i, name in enumerate(editor.available_guns()):
                 g = make_gun(name)
                 sel = name == editor.selected_gun
-                color = PHOS if sel else (INK if world.bank.can_afford(g.cost) else MUTED)
-                palette_hits.append((pygame.Rect(PANEL_X, row - 1, panel_w, 17), "gun", name))
-                text(f"{i + 1} {name:<9}{g.cost:>4}cr", PANEL_X + 2, row, F_S, color)
+                affordable = world.bank.can_afford(g.cost)
+                rowrect = pygame.Rect(PANEL_X, row - 2, panel_w, 18)
+                hover = rowrect.collidepoint(mouse)
+                # button affordance: filled when selected, outlined on hover
+                if sel:
+                    pygame.draw.rect(screen, (26, 52, 46), rowrect, border_radius=4)
+                    pygame.draw.rect(screen, PHOS, rowrect, 1, border_radius=4)
+                elif hover and affordable:
+                    pygame.draw.rect(screen, PANEL, rowrect, border_radius=4)
+                    pygame.draw.rect(screen, GRID, rowrect, 1, border_radius=4)
+                color = PHOS if sel else (INK if affordable else MUTED)
+                palette_hits.append((rowrect, "gun", name))
+                text(f"{i + 1}. {name:<9}{g.cost:>4}cr", PANEL_X + 6, row, F_S, color)
                 for si, k in enumerate(sorted(g.accepts)):  # accepted kinds as swatches
                     pygame.draw.rect(screen, KINDS[k]["color"],
-                                     (PANEL_X + 150 + si * 9, row + 2, 7, 7))
+                                     (PANEL_X + 156 + si * 9, row + 3, 7, 7))
+                row += 19
                 row += 17
             row += 6
             text("MODULES  (click to queue)", PANEL_X, row, F_S, MUTED)

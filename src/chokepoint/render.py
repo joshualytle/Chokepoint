@@ -33,6 +33,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import math
+import os
 import sys
 import threading
 from typing import Any
@@ -49,7 +50,14 @@ from .maps import GW, MAP_LIST, MAPS
 from .metrics import summarize_failure
 from .packets import DIFFICULTY_LIST, KINDS
 from .scores import load_highscore, save_highscore
-from .simulation import MAX_LEAK, QUEUE_CAP, START_HEALTH, STARTING_CREDITS, World
+from .simulation import (
+    DWELL_GRACE,
+    MAX_LEAK,
+    QUEUE_CAP,
+    START_HEALTH,
+    STARTING_CREDITS,
+    World,
+)
 from .syntax import spans as code_spans
 
 QUEUE_WARN = QUEUE_CAP - 2  # queue depth at which a node's marker turns red
@@ -69,7 +77,16 @@ async def main() -> None:  # pragma: no cover - needs a display
     pygame.display.set_caption("Chokepoint — typed turrets vs an alert flood")
     clock = pygame.time.Clock()
 
+    mono_ttf = os.path.join(os.path.dirname(__file__), "assets", "DejaVuSansMono.ttf")
+
     def font(sz: int, bold: bool = False):
+        # SysFont enumerates installed fonts, which hangs under WASM (no fontconfig
+        # in Pyodide). On the web build load the bundled DejaVu Sans Mono instead —
+        # pygame's default font is a heavy sans that's mushy at small sizes.
+        if sys.platform == "emscripten":
+            f = pygame.font.Font(mono_ttf, sz)
+            f.set_bold(bold)
+            return f
         return pygame.font.SysFont("menlo,consolas,dejavusansmono,monospace", sz, bold=bold)
 
     F_S, F_M, F_L = font(13), font(15), font(20, True)
@@ -84,6 +101,7 @@ async def main() -> None:  # pragma: no cover - needs a display
     DANGER = (229, 85, 110)
     GATE_C = (240, 200, 120)
     AMBER = (242, 200, 90)
+    PARSER_C = (190, 150, 255)
 
     map_i = 0
     difficulty_i = 0
@@ -136,6 +154,8 @@ async def main() -> None:  # pragma: no cover - needs a display
                 world.bank.earn(gt.cost)
             for lm in world.limiters:
                 world.bank.earn(lm.cost)
+            for ps in world.parsers:
+                world.bank.earn(ps.cost)
         editor = ArsenalEditor(world.unlocked(), bank=world.bank)
         dropped = editor.seed_purchase(
             loadout_mod.build_loadout(world.unlocked(), world.map.slots)
@@ -147,6 +167,15 @@ async def main() -> None:  # pragma: no cover - needs a display
         build_limiters = getattr(loadout_mod, "build_limiters", None)
         if build_limiters is not None:
             editor.seed_purchase_limiters(build_limiters(world.unlocked(), world.map.slots))
+        # parsers decode raw alerts; only relevant (and only charged) on the
+        # "ingest" difficulty, which is the profile that emits raw traffic.
+        parsers = []
+        build_parsers = getattr(loadout_mod, "build_parsers", None)
+        if build_parsers is not None and world.difficulty == "ingest":
+            for ps in build_parsers(world.unlocked(), world.map.slots):
+                if world.bank.spend(ps.cost):
+                    parsers.append(ps)
+        world.set_parsers(parsers)
         sync_world()
         if dropped:
             say(f"Over budget: {len(dropped)} loadout turret(s) not deployed.", ok=False)
@@ -558,6 +587,19 @@ async def main() -> None:  # pragma: no cover - needs a display
             pygame.draw.line(screen, AMBER, (lx, ly - 9), (lx, ly + 9), 2)
             text(lm.id, lx - 8, ly - 30, F_S, AMBER)
 
+        # parsers: a hexagon decoder at the node, with a swatch per handled kind
+        for ps in world.parsers:
+            if ps.node not in world.map.nodes:
+                continue
+            px, py = (int(v) for v in world.map.pos(ps.node))
+            hexagon = [(px + 11, py), (px + 5, py + 10), (px - 5, py + 10),
+                       (px - 11, py), (px - 5, py - 10), (px + 5, py - 10)]
+            pygame.draw.polygon(screen, BG, hexagon)
+            pygame.draw.polygon(screen, PARSER_C, hexagon, 2)
+            text(ps.id, px - 8, py - 32, F_S, PARSER_C)
+            for ci, k in enumerate(sorted(ps.handles)):
+                pygame.draw.rect(screen, KINDS[k]["color"], (px - 14 + ci * 5, py + 13, 4, 4))
+
         # placement preview: highlight what a click would bind to
         if edit_mode and mouse[0] < GW and editor.placing_limiter:
             col = PHOS if world.bank.can_afford(editor.pending_cost()) else DANGER
@@ -738,6 +780,7 @@ async def main() -> None:  # pragma: no cover - needs a display
         hovered_node = node_under(mouse[0], mouse[1]) if mouse[0] < GW else None
         hovered_gate = next((g for g in world.gates if g.node == hovered_node), None)
         hovered_limiter = next((m for m in world.limiters if m.node == hovered_node), None)
+        hovered_parser = next((ps for ps in world.parsers if ps.node == hovered_node), None)
 
         if hovered_turret is not None:
             g = hovered_turret.gun
@@ -768,6 +811,16 @@ async def main() -> None:  # pragma: no cover - needs a display
             tooltip([f"{hovered_limiter.id}: quelimiter @ {hovered_limiter.node}",
                      f"release {hovered_limiter.release_rate:.0f}/s",
                      f"buffered {len(buffered)}/{hovered_limiter.buffer_cap}"], AMBER)
+        elif hovered_parser is not None:
+            waiting_raw = [p for p in world.queue_at(hovered_parser.node) if p.kind == "raw"]
+            stuck = sorted({p.payload for p in waiting_raw
+                            if not hovered_parser.can_parse(p.payload)})
+            p_lines = [f"{hovered_parser.id}: parser @ {hovered_parser.node}",
+                       "decodes: " + ", ".join(sorted(hovered_parser.handles)),
+                       f"raw decoded this run: {world.parsed}"]
+            if stuck:
+                p_lines.append("can't decode here: " + ", ".join(stuck))
+            tooltip(p_lines, PARSER_C)
         elif hovered_node is not None:
             q = world.queue_at(hovered_node)
             cap = (world.limiter_at(hovered_node).buffer_cap  # type: ignore[union-attr]
@@ -784,7 +837,24 @@ async def main() -> None:  # pragma: no cover - needs a display
                           "serves: " + (", ".join(sorted(served)) if served else "(pass-through)")]
             if tput:
                 node_lines.append(f"throughput {tput:.0f}/s")
-            tooltip(node_lines, INK)
+            aging = False
+            if q:
+                by_kind: dict[str, int] = {}
+                for p in q:
+                    by_kind[p.kind] = by_kind.get(p.kind, 0) + 1
+                node_lines.append("queued: " + ", ".join(f"{k}x{n}"
+                                                          for k, n in sorted(by_kind.items())))
+                oldest = max(p.wait for p in q)
+                aging = oldest > DWELL_GRACE
+                node_lines.append(f"oldest wait {oldest:.1f}s / grace {DWELL_GRACE:.0f}s"
+                                  + ("  -> BLEEDING HEALTH" if aging else ""))
+                # kinds piling up that this node's own turrets can't accept (a local
+                # specialization mismatch): they only drain if routed onward.
+                if served:
+                    unhandled = sorted(k for k in by_kind if k not in served)
+                    if unhandled:
+                        node_lines.append("not served here: " + ", ".join(unhandled))
+            tooltip(node_lines, DANGER if aging else INK)
 
         # ---- help overlay (toggle H): controls + kind/gun legend ----
         if help_mode and not world.over:

@@ -19,5 +19,39 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from chokepoint.render import main  # noqa: E402  (after sys.path setup)
 
+
+async def _run() -> None:
+    """Run the game; on the web, paint the outcome on-canvas (no devtools needed).
+
+    If ``main()`` raises or returns, pygbag otherwise just blanks to grey with no
+    clue why — especially on mobile. This draws the traceback (or an "ended"
+    notice) onto the existing surface so the failure is readable on any device.
+    """
+    import pygame
+
+    try:
+        await main()
+        message, bg = "Game loop ended (window closed).", (10, 22, 34)
+    except Exception:
+        import traceback
+
+        message, bg = traceback.format_exc(), (28, 4, 6)
+
+    surface = pygame.display.get_surface()
+    if surface is None:  # no display (e.g. headless desktop) — re-raise for the console
+        if bg == (28, 4, 6):
+            raise
+        return
+    pygame.font.init()
+    glyph = pygame.font.Font(None, 20)
+    lines = message.splitlines()[-30:]
+    while True:
+        surface.fill(bg)
+        for i, line in enumerate(lines):
+            surface.blit(glyph.render(line[:118], True, (240, 200, 200)), (8, 8 + i * 20))
+        pygame.display.flip()
+        await asyncio.sleep(0.25)
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(_run())

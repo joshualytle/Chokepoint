@@ -269,7 +269,10 @@ async def main() -> None:  # pragma: no cover - needs a display
             out.append(line)
         return out
 
-    deploy_loadout()
+    # Start with a CLEAN board — you build it (guided by the tutorial/coach), or
+    # press F5 to load the example loadout.py. sync_world pushes the empty editor.
+    sync_world()
+    world.set_parsers([])
 
     def text(s: str, x: int, y: int, f=F_S, c=INK) -> None:
         screen.blit(f.render(s, True, c), (x, y))
@@ -571,8 +574,8 @@ async def main() -> None:  # pragma: no cover - needs a display
         if worst_node is not None and worst_depth > QUEUE_WARN:
             pygame.draw.circle(screen, DANGER, worst_node, 22, 2)
             text("BOTTLENECK", worst_node[0] - 34, worst_node[1] + 24, F_S, DANGER)
-            text("more/faster turrets here, or a limiter (B)",
-                 worst_node[0] - 110, worst_node[1] + 40, F_S, AMBER)
+            text("add a turret, a limiter (B), or a parallel branch (T) to spill into",
+                 worst_node[0] - 150, worst_node[1] + 40, F_S, AMBER)
 
         hovered_turret = None
         for t in world.turrets:

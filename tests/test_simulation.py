@@ -3,8 +3,9 @@
 from chokepoint import llm_assist
 from chokepoint.arsenal import Turret, make_gun
 from chokepoint.loadout import build_loadout
-from chokepoint.maps import MAPS
-from chokepoint.simulation import START_HEALTH, World
+from chokepoint.maps import MAPS, build_graph
+from chokepoint.packets import Packet
+from chokepoint.simulation import SPILL_AT, START_HEALTH, World
 
 
 def make_world(turrets=None, map_name="switchback"):
@@ -142,3 +143,43 @@ def test_llm_unavailable_is_graceful():
     assert llm_assist.available("http://localhost:9", timeout=0.3) is False
     msg = llm_assist.diagnose("ctx", "why leaks?", url="http://localhost:9", timeout=0.3)
     assert isinstance(msg, str) and "unavailable" in msg.lower()
+
+
+# ---- spill / overflow routing ("else" to a parallel consumer) ---- #
+def _fork_map():
+    """source -> n1 (fork) -> {backup, trunk2} -> sink."""
+    return build_graph(
+        "forktest",
+        {"n0": (0, 0), "n1": (100, 0), "backup": (200, -50),
+         "trunk2": (200, 50), "sink": (300, 0)},
+        [("n0", "n1"), ("n1", "backup"), ("n1", "trunk2"),
+         ("backup", "sink"), ("trunk2", "sink")],
+        "n0", "sink", [(100, 0), (200, -50)],
+    )
+
+
+def test_spill_routes_excess_to_a_parallel_consumer():
+    gm = _fork_map()
+    w = World(gm)
+    w.spawn_q.clear()
+    w.set_turrets([Turret(*gm.pos("n1"), make_gun("sieve")),       # primary on the fork
+                   Turret(*gm.pos("backup"), make_gun("sieve"))])  # backup on a branch
+    for _ in range(SPILL_AT + 3):
+        w.packets.append(Packet("auth", 12, 12, 60, at="n1"))
+    w._spill(1 / 60)
+    spilled = [p for p in w.packets if p.moving_to == "backup"]
+    waiting = [p for p in w.packets if p.moving_to is None and p.at == "n1"]
+    assert len(spilled) == 3            # the excess over SPILL_AT
+    assert len(waiting) == SPILL_AT     # the primary keeps a working backlog
+
+
+def test_no_spill_without_a_parallel_consumer():
+    gm = build_graph("lin", {"n0": (0, 0), "n1": (100, 0), "sink": (200, 0)},
+                     [("n0", "n1"), ("n1", "sink")], "n0", "sink", [(100, 0)])
+    w = World(gm)
+    w.spawn_q.clear()
+    w.set_turrets([Turret(*gm.pos("n1"), make_gun("sieve"))])
+    for _ in range(SPILL_AT + 3):
+        w.packets.append(Packet("auth", 12, 12, 60, at="n1"))
+    w._spill(1 / 60)
+    assert all(p.moving_to is None for p in w.packets)  # nowhere to spill -> they stay

@@ -67,7 +67,13 @@ SCRIPT: list[Step] = [
     ], event="code"),
     Step("Your code", [
         "This is Python you control. Ctrl+S applies your changes, Esc closes.",
+        "The board starts empty — press  F5  any time to load this example build.",
         "Add or change turrets here, then watch the board react.",
+    ]),
+    Step("Branches handle overload", [
+        "When one worker can't keep up, build a PARALLEL path: press  T  to add a",
+        "node off the line and an edge to it, then place a backup turret there.",
+        "Overload automatically SPILLS down that branch — your 'else' for a full gun.",
     ]),
     Step("You're ready", [
         "The COACH line (bottom-left) always tells you what to fix next.",

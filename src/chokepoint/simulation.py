@@ -36,6 +36,7 @@ PACKET_SPEED = 60.0
 MAX_LEAK = 12              # dropped/overflowed packets that end the run
 START_HEALTH = 100.0       # latency budget; bleeds while packets dwell too long
 QUEUE_CAP = 8              # packets a node holds before it overflows (a drop)
+SPILL_AT = 4               # served packets waiting beyond this spill to a parallel branch
 DWELL_GRACE = 3.0          # seconds a packet may queue before it bleeds health
 DWELL_DRAIN = 3.0          # health/sec drained per packet queued past the grace
 
@@ -258,6 +259,7 @@ class World:
         self._transit(dt)
         self._parse(dt)
         self._process(dt)
+        self._spill(dt)
         self._route_and_dwell(dt)
         self._release_limiters(dt)
         self._overflow()
@@ -329,6 +331,35 @@ class World:
                     target.dead = True
                     self.stats[target.kind].handled += 1
                     self.telemetry.on_handle(target.kind, t.node, self.wave_idx, target.wait)
+
+    def _spill(self, dt: float) -> None:
+        """Overflow routing ("else"): when a node's turret is saturated, send the
+        backlog of a served kind down a branch that reaches another consumer of
+        that kind, instead of letting it pile up and drop. This is the load-shed
+        you design by building a parallel branch with a backup turret — the
+        engine balances onto it automatically once the primary can't keep up.
+        """
+        for node_id in self.map.nodes:
+            outs = self.map.branches(node_id)
+            if not outs:
+                continue
+            served_kinds: set[str] = set()
+            for t in self.turrets:
+                if t.node == node_id:
+                    served_kinds |= t.accepts()
+            if not served_kinds:
+                continue
+            queue = self.queue_at(node_id)
+            for kind in served_kinds:
+                waiting = [p for p in queue if p.kind == kind and not p.handled]
+                excess = len(waiting) - SPILL_AT
+                if excess <= 0:
+                    continue
+                overflow = next((b for b in outs if self._branch_reaches_server(b, kind)), None)
+                if overflow is None:
+                    continue                       # no parallel consumer to spill to
+                for p in waiting[:excess]:         # oldest first
+                    p.moving_to, p.seg_pos, p.wait = overflow, 0.0, 0.0
 
     def _dispatch(self, p: Packet) -> None:
         """Send a queued packet onward (gate-routed at a fork); leak it at the sink."""

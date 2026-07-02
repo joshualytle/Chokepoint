@@ -699,9 +699,27 @@ async def main() -> None:  # pragma: no cover - needs a display
         sand_txt = "   · SANDBOX" if sandbox else ""
         text(f"mode: {world.difficulty}   D to cycle{speed_txt}{sand_txt}   ·   H for help",
              12, WIN_H - 40, F_S, PHOS if sandbox else MUTED)
-        # live coach: the single most important thing to fix right now
-        if coach and not build_mode and not code_mode and not world.over:
-            text("COACH: " + coach[0].text, 12, WIN_H - 78, F_S, coach_c[coach[0].level])
+        # live coach: the single most important thing to fix — a teaching card
+        # (symptom + why + fix + concept) when something's wrong, one line when clear
+        if coach and not build_mode and not code_mode and not world.over and not tutorial.active:
+            h = coach[0]
+            if h.level == "ok":
+                text("COACH: " + h.text, 12, WIN_H - 78, F_S, coach_c["ok"])
+            else:
+                pw = int(GW * 0.62)
+                clines: list[tuple[str, Any]] = [(f"COACH  >  {h.text}", coach_c[h.level])]
+                for j, ln in enumerate(wrap(h.why, pw - 28, F_S)):
+                    clines.append((("WHY:  " if j == 0 else "      ") + ln, INK))
+                for j, ln in enumerate(wrap(h.fix, pw - 28, F_S)):
+                    clines.append((("FIX:  " if j == 0 else "      ") + ln, AMBER))
+                if h.concept:
+                    clines.append((f"concept: {h.concept}", MUTED))
+                ph = len(clines) * 16 + 14
+                py = WIN_H - 96 - ph
+                pygame.draw.rect(screen, PANEL2, (10, py, pw, ph), border_radius=6)
+                pygame.draw.rect(screen, coach_c[h.level], (10, py, pw, ph), 1, border_radius=6)
+                for j, (ln, c) in enumerate(clines):
+                    text(ln, 20, py + 8 + j * 16, F_S, c)
         # transient action feedback (save/reload/over-budget/difficulty), always visible
         if toast["ttl"] > 0:
             toast["ttl"] -= dt
@@ -1000,10 +1018,15 @@ async def main() -> None:  # pragma: no cover - needs a display
             text(f"cost / handled: {eff['cost_per_handled']:.0f}cr", 24, yy + 52, F_S, INK)
             # coach: everything worth fixing, not just the top line
             text("COACH", 360, 56, F_S, MUTED)
-            for i, h in enumerate(coach):
+            yy2 = 76
+            for h in coach:
                 for j, ln in enumerate(wrap(h.text, GW - 380, F_S)):
-                    text(("- " if j == 0 else "  ") + ln, 360, 76 + i * 34 + j * 16,
-                         F_S, coach_c[h.level])
+                    text(("- " if j == 0 else "  ") + ln, 360, yy2, F_S, coach_c[h.level])
+                    yy2 += 16
+                for ln in wrap(h.fix, GW - 396, F_S) if h.fix else []:
+                    text("    -> " + ln, 360, yy2, F_S, AMBER)
+                    yy2 += 16
+                yy2 += 6
 
         # in-app code editor (toggle C): edit loadout.py, Ctrl+S to apply
         if code_mode:

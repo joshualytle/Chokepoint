@@ -44,6 +44,7 @@ from .arsenal import GUN_LIBRARY, MODULE_LIBRARY, active_synergies, gun_cost, ma
 from .codebuffer import TextBuffer
 from .editor import ArsenalEditor
 from .gates import DEFAULT_GATE_COST
+from .glossary import GLOSSARY, HUD_HELP
 from .hints import coaching
 from .lessons import Lessons
 from .limiter import DEFAULT_LIMITER_COST
@@ -137,6 +138,7 @@ async def main() -> None:  # pragma: no cover - needs a display
     # palette rows registered each frame so panel clicks can be mapped to actions:
     # (rect, "gun"|"mod", name)
     palette_hits: list[tuple[Any, str, str]] = []
+    help_hits: list[tuple[Any, list[str]]] = []  # (rect, tooltip lines) for HUD "what is this?"
     llm_state: dict[str, str] = {"status": "idle", "text": "Press L for local-LLM help."}
     # transient action feedback, shown in every mode (unlike the LLM box)
     toast: dict[str, Any] = {"text": "", "ttl": 0.0, "ok": True}
@@ -749,12 +751,16 @@ async def main() -> None:  # pragma: no cover - needs a display
             toast["ttl"] -= dt
             text(toast["text"], 12, WIN_H - 60, F_S, PHOS if toast["ok"] else DANGER)
 
-        # ---- panel ----
+        # ---- panel ----  (hover any stat/kind for a plain-language explanation)
+        help_hits.clear()
+        pw_stat = WIN_W - PANEL_X - 14
         text("CHOKEPOINT", PANEL_X, 16, F_M, PHOS)
         text(f"wave {world.level}", PANEL_X, 40, F_S, INK)
         leak_c = DANGER if world.leaks >= MAX_LEAK - 3 else INK
         text(f"leaks {world.leaks}/{MAX_LEAK}", PANEL_X + 110, 40, F_S, leak_c)
+        help_hits.append((pygame.Rect(PANEL_X + 110, 40, 120, 16), HUD_HELP["leaks"]))
         text(f"cr {world.bank.balance}", PANEL_X + 240, 40, F_S, PHOS)
+        help_hits.append((pygame.Rect(PANEL_X + 240, 40, 90, 16), HUD_HELP["credits"]))
 
         # health: the latency budget, bled by packets that sit queued too long
         hp_frac = max(0.0, world.health / START_HEALTH)
@@ -762,15 +768,18 @@ async def main() -> None:  # pragma: no cover - needs a display
         text(f"health {world.health:.0f}", PANEL_X, 60, F_S, hp_c)
         pygame.draw.rect(screen, GRID, (PANEL_X + 90, 62, 120, 8))
         pygame.draw.rect(screen, hp_c, (PANEL_X + 90, 62, int(120 * hp_frac), 8))
+        help_hits.append((pygame.Rect(PANEL_X, 58, 210, 16), HUD_HELP["health"]))
 
         gaps = sorted(world.coverage_gaps())
         if gaps:
             text("COVERAGE GAP: " + ", ".join(gaps), PANEL_X, 78, F_S, DANGER)
         else:
             text("coverage: all seen kinds handled", PANEL_X, 78, F_S, PHOS)
+        help_hits.append((pygame.Rect(PANEL_X, 78, pw_stat, 16), HUD_HELP["coverage"]))
 
         # per-kind table
         text("KIND        in  ok  leak  now", PANEL_X, 100, F_S, MUTED)
+        help_hits.append((pygame.Rect(PANEL_X, 100, pw_stat, 16), HUD_HELP["kinds"]))
         row = 118
         gap_kinds = world.coverage_gaps()
         for k, s in world.stats.items():
@@ -781,6 +790,10 @@ async def main() -> None:  # pragma: no cover - needs a display
             mark = "!" if gap else " "  # uncovered kinds flagged before they pile up
             line = f"{mark}{k:<9} {s.spawned:>3} {s.handled:>3} {s.leaked:>4} {s.inflight:>4}"
             text(line, PANEL_X + 14, row, F_S, DANGER if (gap or s.leaked) else INK)
+            help_hits.append((pygame.Rect(PANEL_X, row, pw_stat, 16),
+                              [f"{k} — {KINDS[k]['desc']}",
+                               "columns: in / ok / leak / now",
+                               "= arrived / handled / leaked / in the queue now"]))
             row += 18
 
         row += 8
@@ -949,13 +962,32 @@ async def main() -> None:  # pragma: no cover - needs a display
                     if unhandled:
                         node_lines.append("not served here: " + ", ".join(unhandled))
             tooltip(node_lines, DANGER if aging else INK)
+        else:
+            # "what is this?" — hover any HUD stat/kind row for a plain explanation
+            for hrect, hlines in help_hits:
+                if hrect.collidepoint(mouse):
+                    tooltip(hlines)
+                    break
 
-        # ---- help overlay (toggle H): controls + kind/gun legend ----
+        # ---- help overlay (toggle H): controls + kind/gun legend + glossary ----
         if help_mode and not world.over:
             ov = pygame.Surface((GW, WIN_H), pygame.SRCALPHA)
             ov.fill((8, 14, 22, 235))
             screen.blit(ov, (0, 0))
             text("HELP — H to close", 24, 20, F_M, PHOS)
+            # glossary column on the right (concepts in plain language)
+            gx = 400
+            text("GLOSSARY", gx, 52, F_S, MUTED)
+            gy = 70
+            for term, defn in GLOSSARY:
+                text(term, gx, gy, F_S, PHOS)
+                gy += 16
+                for ln in wrap(defn, GW - gx - 20, F_S):
+                    text(ln, gx + 10, gy, F_S, INK)
+                    gy += 16
+                gy += 8
+            text("Tip: in play, hover any stat or kind for a quick explanation.",
+                 gx, gy + 2, F_S, AMBER)
             controls = [
                 ("[ ]", "previous / next map"), ("E", "placement editor"),
                 ("G", "gate router (in editor)"), ("B", "quelimiter (in editor)"),

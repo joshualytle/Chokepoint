@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chokepoint</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="boot">Loading Python runtime…<div id="boot-sub"></div></div>
+
+  <header>
+    <h1>CHOKEPOINT</h1>
+    <span class="tag">typed-alert tower-defense · write Python to hold the line</span>
+  </header>
+
+  <main>
+    <section class="board-col">
+      <canvas id="board" width="820" height="620"></canvas>
+      <div class="controls">
+        <button id="startBtn" class="primary">▶ Start</button>
+        <button id="resetBtn">Reset</button>
+        <label>map
+          <select id="mapSel"></select>
+        </label>
+        <label>difficulty
+          <select id="diffSel"></select>
+        </label>
+        <span id="waveMsg" class="wavemsg"></span>
+      </div>
+    </section>
+
+    <section class="side-col">
+      <div id="hud" class="hud"></div>
+
+      <div class="editor-wrap">
+        <div class="editor-head">
+          <span>loadout.py — your build in Python</span>
+          <button id="runBtn" class="primary">Run ▸ (Ctrl+Enter)</button>
+        </div>
+        <textarea id="code" spellcheck="false"></textarea>
+        <div id="codeStatus" class="code-status"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

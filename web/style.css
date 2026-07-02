@@ -1,0 +1,103 @@
+:root {
+  --bg: #0e1622;
+  --panel: #131f2e;
+  --panel2: #0b1320;
+  --grid: #1c2c3e;
+  --ink: #e2ecf4;
+  --muted: #93a6b8;
+  --phos: #38e1b0;
+  --danger: #e5556e;
+  --amber: #f2c85a;
+  --gate: #f0c878;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/1.45 "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas,
+        "DejaVu Sans Mono", monospace;
+}
+
+#boot {
+  position: fixed; inset: 0; z-index: 50;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: var(--bg); color: var(--phos); font-size: 18px; gap: 10px;
+}
+#boot-sub { color: var(--muted); font-size: 13px; }
+#boot.hidden { display: none; }
+
+header {
+  display: flex; align-items: baseline; gap: 14px;
+  padding: 12px 18px; border-bottom: 1px solid var(--grid);
+}
+header h1 { margin: 0; color: var(--phos); font-size: 20px; letter-spacing: 2px; }
+header .tag { color: var(--muted); font-size: 13px; }
+
+main {
+  display: flex; gap: 16px; padding: 16px; align-items: flex-start;
+  flex-wrap: wrap;
+}
+.board-col { display: flex; flex-direction: column; gap: 10px; }
+
+canvas#board {
+  background: var(--panel2);
+  border: 1px solid var(--grid);
+  border-radius: 8px;
+  width: 820px; height: 620px;   /* logical CSS size; backing store scaled by DPR */
+  max-width: 100%;
+}
+
+.controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.controls label { color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.wavemsg { color: var(--amber); }
+
+button, select {
+  background: var(--panel); color: var(--ink);
+  border: 1px solid var(--grid); border-radius: 6px;
+  padding: 7px 12px; font: inherit; cursor: pointer;
+}
+button:hover { border-color: var(--muted); }
+button.primary { background: #123c33; border-color: var(--phos); color: var(--phos); }
+button.primary:hover { background: #16493d; }
+
+.side-col { flex: 1 1 380px; min-width: 340px; display: flex; flex-direction: column; gap: 14px; }
+
+.hud {
+  background: var(--panel); border: 1px solid var(--grid); border-radius: 8px;
+  padding: 12px 14px;
+}
+.hud .row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.hud .stat b { color: var(--phos); }
+.hud .bar { height: 8px; width: 130px; background: var(--grid); border-radius: 4px; overflow: hidden; }
+.hud .bar > i { display: block; height: 100%; background: var(--phos); }
+.hud .cov-ok { color: var(--phos); }
+.hud .cov-gap { color: var(--danger); }
+.hud .hoverable { cursor: help; border-bottom: 1px dotted var(--muted); }
+
+table.kinds { width: 100%; border-collapse: collapse; margin-top: 10px; }
+table.kinds th { color: var(--muted); text-align: right; font-weight: normal; padding: 2px 6px; }
+table.kinds th:first-child { text-align: left; }
+table.kinds td { text-align: right; padding: 2px 6px; }
+table.kinds td:first-child { text-align: left; }
+table.kinds .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+table.kinds tr.gap td { color: var(--danger); }
+
+.editor-wrap {
+  background: var(--panel); border: 1px solid var(--grid); border-radius: 8px;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.editor-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 12px; border-bottom: 1px solid var(--grid); color: var(--muted);
+}
+textarea#code {
+  background: var(--panel2); color: var(--ink); border: 0; resize: vertical;
+  padding: 12px; min-height: 240px; font: 13px/1.5 inherit; tab-size: 4;
+  outline: none;
+}
+.code-status { padding: 8px 12px; border-top: 1px solid var(--grid); min-height: 20px; color: var(--muted); }
+.code-status.ok { color: var(--phos); }
+.code-status.err { color: var(--danger); }

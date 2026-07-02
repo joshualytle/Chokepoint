@@ -48,6 +48,15 @@ def test_finishing_the_last_lesson_deactivates():
     assert not le.active
 
 
+def test_has_hands_on_lessons_with_starters_and_checks():
+    hands_on = [le for le in LESSONS if le.starter is not None]
+    assert hands_on, "expect at least one hands-on lesson with a starter snippet"
+    for le in hands_on:
+        assert le.check is not None      # a real, verifiable task
+        assert le.sandbox                # free credits so budget isn't the blocker
+        assert "def build_loadout" in le.starter
+
+
 def test_first_default_lesson_checks_a_deployed_turret():
     # lesson 1's check should read the world's turret list
     class _W:

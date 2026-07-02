@@ -219,7 +219,9 @@ async def main() -> None:  # pragma: no cover - needs a display
         We compile and dry-run build_loadout first, so a syntax/author error is
         reported in the editor and the on-disk loadout.py is never corrupted.
         """
-        ns: dict = {}
+        # seed __name__/__package__ so the file's relative imports (from .arsenal)
+        # resolve when we exec it outside the normal import machinery.
+        ns: dict = {"__name__": "chokepoint.loadout", "__package__": "chokepoint"}
         try:
             exec(compile(src, loadout_mod.__file__, "exec"), ns)  # noqa: S102 - intended in-app eval
             if "build_loadout" not in ns:
@@ -235,6 +237,39 @@ async def main() -> None:  # pragma: no cover - needs a display
         deploy_loadout(refund_current=True)
         code_status["msg"] = "applied OK"
         say("loadout applied from editor")
+
+    def run_lesson_code(src: str) -> None:
+        """Run a lesson's build_loadout in-memory and deploy it — never writes the
+        file. Used by hands-on lessons so your real loadout.py stays untouched."""
+        nonlocal editor
+        ns: dict = {"__name__": "chokepoint.loadout", "__package__": "chokepoint"}
+        try:
+            exec(compile(src, "<lesson>", "exec"), ns)  # noqa: S102 - intended in-app eval
+            turrets = (ns["build_loadout"](world.unlocked(), world.map.slots)
+                       if "build_loadout" in ns else [])
+        except Exception as err:
+            code_status["msg"] = f"error: {err}"
+            say("code not applied — see editor", ok=False)
+            return
+        for t in world.turrets:            # refund and reseed from the lesson build
+            world.bank.earn(gun_cost(t.gun))
+        editor = ArsenalEditor(world.unlocked(), bank=world.bank)
+        editor.seed_purchase(turrets)
+        sync_world()
+        code_status["msg"] = "ran (lesson — not saved to loadout.py)"
+
+    def enter_lesson() -> None:
+        """On moving into a lesson: load any starter code and grant sandbox credits."""
+        nonlocal code_scroll, sandbox
+        le = lessons.lesson
+        if le is None:
+            return
+        if le.starter is not None:
+            code_buf.set_text(le.starter)
+            code_scroll = 0
+        if le.sandbox:
+            sandbox = True
+            world.bank.balance = max(world.bank.balance, 100000)  # free credits to focus on code
 
     def switch_map(delta: int) -> None:
         nonlocal map_i, world, edit_mode, awaiting_start
@@ -315,7 +350,11 @@ async def main() -> None:  # pragma: no cover - needs a display
                 if ev.key == pygame.K_ESCAPE:
                     code_mode = False
                 elif (ev.mod & pygame.KMOD_CTRL) and ev.key == pygame.K_s:
-                    apply_code(code_buf.text())
+                    le = lessons.lesson if lessons.active else None
+                    if le is not None and le.starter is not None:
+                        run_lesson_code(code_buf.text())   # hands-on lesson: don't touch the file
+                    else:
+                        apply_code(code_buf.text())
                 elif (ev.mod & pygame.KMOD_CTRL) and ev.key == pygame.K_z:
                     code_buf.undo()
                 elif ev.key == pygame.K_RETURN:
@@ -376,11 +415,15 @@ async def main() -> None:  # pragma: no cover - needs a display
                 elif ev.key == pygame.K_h:
                     help_mode = not help_mode
                 elif ev.key == pygame.K_c:
-                    try:
-                        with open(loadout_mod.__file__, encoding="utf-8") as fh:
-                            code_buf.set_text(fh.read())
-                    except OSError as err:
-                        code_buf.set_text(f"# could not read loadout.py: {err}\n")
+                    le = lessons.lesson if lessons.active else None
+                    if le is not None and le.starter is not None:
+                        code_buf.set_text(le.starter)   # a hands-on lesson: show its starter
+                    else:
+                        try:
+                            with open(loadout_mod.__file__, encoding="utf-8") as fh:
+                                code_buf.set_text(fh.read())
+                        except OSError as err:
+                            code_buf.set_text(f"# could not read loadout.py: {err}\n")
                     code_status["msg"] = ""
                     code_scroll = 0
                     code_mode = True
@@ -438,12 +481,14 @@ async def main() -> None:  # pragma: no cover - needs a display
             elif (ev.type == pygame.MOUSEBUTTONDOWN and code_mode and ev.button == 1
                   and les_next is not None and les_next.collidepoint(ev.pos)):
                 lessons.next()
+                enter_lesson()   # load the next lesson's starter / sandbox, if any
             elif (ev.type == pygame.MOUSEBUTTONDOWN and code_mode and ev.button == 1
                   and les_skip is not None and les_skip.collidepoint(ev.pos)):
                 lessons.skip()
             elif (ev.type == pygame.MOUSEBUTTONDOWN and code_mode and ev.button == 1
                   and les_start is not None and les_start.collidepoint(ev.pos)):
                 lessons.start()
+                enter_lesson()
             elif (ev.type == pygame.MOUSEBUTTONDOWN and code_mode and ev.button == 1
                   and ev.pos[0] < LESSON_X - 14):  # caret positioning in the code area only
                 mx, my = ev.pos

@@ -25,6 +25,11 @@ class Lesson:
     concept: str = ""                                 # short idiom label
     # None = a read-only lesson (advance with Next); else advance once it's true
     check: Callable[[Any, Any], bool] | None = None
+    # a hands-on lesson: load this code into the editor and run it in-memory on
+    # Ctrl+S (never writes loadout.py); ``sandbox`` grants free credits to focus
+    # on the code, not the budget.
+    starter: str | None = None
+    sandbox: bool = False
 
 
 # The track. Keep paragraphs short so they wrap cleanly in the side panel.
@@ -47,12 +52,21 @@ LESSONS: list[Lesson] = [
         concept="function calls & unpacking",
     ),
     Lesson(
-        "Lists hold your turrets",
-        ["Square brackets make a list: `turrets = []`, and `turrets.append(t)` adds"
-         " to it. build_loadout returns a list — more entries, more turrets.",
-         "Tip: press K first for sandbox credits if you run short."],
-        task="Add another Turret(...) line to the returned list, then Ctrl+S.",
-        concept="lists",
+        "Lists — cover another type",
+        ["Square brackets make a list; more entries mean more turrets.",
+         "The starter covers auth/dns with a sieve. `ids` and `firewall` are still"
+         " uncovered — a scatter handles those."],
+        task="Add  Turret(*slots[1], gun=make_gun('scatter'))  to the list, then Ctrl+S.",
+        concept="lists & coverage",
+        sandbox=True,
+        check=lambda w, e: "ids" in w.coverage(),
+        starter=(
+            "from chokepoint.arsenal import Turret, make_gun\n\n"
+            "def build_loadout(unlocked, slots):\n"
+            "    turrets = [Turret(*slots[0], gun=make_gun('sieve'))]  # covers auth, dns\n"
+            "    # TODO: add a scatter on slots[1] to also cover ids and firewall\n"
+            "    return turrets\n"
+        ),
     ),
     Lesson(
         "Sets & membership: if ... in ...",
@@ -63,12 +77,20 @@ LESSONS: list[Lesson] = [
         concept="sets & membership",
     ),
     Lesson(
-        "Comprehensions",
+        "Comprehensions — one per slot",
         ["Build many at once: `[Turret(*s, gun=make_gun('sieve')) for s in slots]`"
          " makes one turret per slot.",
          "That's a list comprehension — Python's compact for-loop-into-a-list."],
-        task="Try replacing the returned list with a comprehension over slots.",
+        task="Replace the empty list with that comprehension over slots, then Ctrl+S.",
         concept="list comprehensions",
+        sandbox=True,
+        check=lambda w, e: len(w.turrets) >= len(w.map.slots),
+        starter=(
+            "from chokepoint.arsenal import Turret, make_gun\n\n"
+            "def build_loadout(unlocked, slots):\n"
+            "    # TODO: return one sieve per slot, using a list comprehension\n"
+            "    return []\n"
+        ),
     ),
     Lesson(
         "Parsers in code (ingest)",

@@ -757,30 +757,35 @@ async def main() -> None:  # pragma: no cover - needs a display
             text("drag/click place · LMB turret=equip · RMB remove · X clear all",
                  PANEL_X, row, F_S, MUTED)
             row += 20
-            text("GUNS — click one, then click the line to place it", PANEL_X, row, F_S, AMBER)
-            row += 17
-            text("(colored squares = the alert types it handles)", PANEL_X, row, F_S, MUTED)
-            row += 17
+            text("GUNS — click one, then click a node to place it", PANEL_X, row, F_S, AMBER)
+            row += 20
             for i, name in enumerate(editor.available_guns()):
                 g = make_gun(name)
                 sel = name == editor.selected_gun
                 affordable = world.bank.can_afford(g.cost)
-                rowrect = pygame.Rect(PANEL_X, row - 2, panel_w, 18)
-                hover = rowrect.collidepoint(mouse)
-                # button affordance: filled when selected, outlined on hover
+                card = pygame.Rect(PANEL_X, row, panel_w, 30)
+                hover = card.collidepoint(mouse)
+                # every gun is a clear button: subtle fill always, outline on hover,
+                # green fill + border when selected
+                pygame.draw.rect(screen, (26, 52, 46) if sel else PANEL, card, border_radius=5)
                 if sel:
-                    pygame.draw.rect(screen, (26, 52, 46), rowrect, border_radius=4)
-                    pygame.draw.rect(screen, PHOS, rowrect, 1, border_radius=4)
+                    pygame.draw.rect(screen, PHOS, card, 2, border_radius=5)
                 elif hover and affordable:
-                    pygame.draw.rect(screen, PANEL, rowrect, border_radius=4)
-                    pygame.draw.rect(screen, GRID, rowrect, 1, border_radius=4)
-                color = PHOS if sel else (INK if affordable else MUTED)
-                palette_hits.append((rowrect, "gun", name))
-                text(f"{i + 1}. {name:<9}{g.cost:>4}cr", PANEL_X + 6, row, F_S, color)
-                for si, k in enumerate(sorted(g.accepts)):  # accepted kinds as swatches
-                    pygame.draw.rect(screen, KINDS[k]["color"],
-                                     (PANEL_X + 156 + si * 9, row + 3, 7, 7))
-                row += 19
+                    pygame.draw.rect(screen, GRID, card, 1, border_radius=5)
+                palette_hits.append((card, "gun", name))
+                name_c = PHOS if sel else (INK if affordable else MUTED)
+                text(f"{i + 1}", PANEL_X + 8, row + 5, F_S, MUTED)
+                text(name, PANEL_X + 26, row + 3, F_M, name_c)
+                cost_s = f"{g.cost}cr"
+                text(cost_s, PANEL_X + panel_w - 10 - F_S.size(cost_s)[0], row + 5, F_S,
+                     name_c if affordable else DANGER)
+                # alert types it handles, as colored labels (clearer than tiny dots)
+                kx = PANEL_X + 26
+                for k in sorted(g.accepts):
+                    pygame.draw.rect(screen, KINDS[k]["color"], (kx, row + 20, 6, 6))
+                    text(k, kx + 9, row + 17, F_S, KINDS[k]["color"])
+                    kx += 9 + F_S.size(k)[0] + 9
+                row += 33
                 row += 17
             row += 6
             text("MODULES  (click to queue)", PANEL_X, row, F_S, MUTED)
@@ -1063,18 +1068,19 @@ async def main() -> None:  # pragma: no cover - needs a display
             text("Press R to retry, or edit loadout.py and F5.",
                  GW // 2 - 150, WIN_H - 80, F_S, INK)
 
-        # guided tutorial: a card over the playfield with Next/Skip buttons
+        # guided tutorial: a card docked at the BOTTOM so it never covers the board
+        # (nodes/turrets sit up top) — you can read the step and act at the same time.
         tut_next = tut_skip = None
         if tutorial.active and tutorial.step is not None:
             step = tutorial.step
-            # dim the playfield a little so the card reads, but stays visible behind it
-            shade = pygame.Surface((GW, WIN_H), pygame.SRCALPHA)
-            shade.fill((8, 14, 22, 150))
-            screen.blit(shade, (0, 0))
-            bw = min(760, GW - 40)
+            bw = min(720, GW - 24)
             line_h = F_S.get_height() + 5
             bh = 52 + len(step.body) * line_h + 40
-            bx, by = (GW - bw) // 2, (WIN_H - bh) // 2
+            bx, by = (GW - bw) // 2, WIN_H - bh - 14
+            # a soft backdrop just behind the card keeps the board fully visible above it
+            backdrop = pygame.Surface((bw + 16, bh + 12), pygame.SRCALPHA)
+            backdrop.fill((6, 10, 16, 220))
+            screen.blit(backdrop, (bx - 8, by - 6))
             pygame.draw.rect(screen, PANEL2, (bx, by, bw, bh), border_radius=8)
             pygame.draw.rect(screen, PHOS, (bx, by, bw, bh), 2, border_radius=8)
             idx = tutorial.script.index(step) + 1

@@ -11,10 +11,10 @@ teaches the skills behind high-volume alert pipelines — **typed routing,
 consumer specialization/coverage, queue/latency backpressure, and
 flood/burst handling**.
 
-## Who I'm working with
+## Who this is for
 
-An experienced security/DevOps engineer **learning Python** for an AWS Lambda +
-Python alert-pipeline role. So:
+The audience is people **learning Python** — often engineers from ops, security,
+or DevOps who know pipelines but are new to the language. So, when contributing:
 
 - Explain a Python idiom briefly the first time it appears (decorators, frozen
   dataclasses, `frozenset`, comprehensions, `key=` functions, threading).
@@ -27,8 +27,9 @@ Python alert-pipeline role. So:
 ## Architecture
 
 ```
-packets.py     alert KINDS + WAVES (flood/burst), plus difficulty strategies
-               (easy/adaptive/overkill) in the DIFFICULTIES registry. Pure data.
+packets.py     alert KINDS (incl. "raw") + Packet.payload + WAVES (flood/burst),
+               plus difficulty strategies (calm/easy/adaptive/overkill/ingest)
+               in the DIFFICULTIES registry. Pure data.
 arsenal.py     Gun (static fire_rate, accepts set, cost), Module (attach to upgrade,
                cost), Turret (carries its x/y), registries (@register_gun,
                register_module), gun_cost(), SYNERGIES, unlocked_at(wave). Drop-in.
@@ -41,6 +42,9 @@ limiter.py     Limiter (quelimiter) — placed on a node; buffers a burst (large
                cap) and releases unserved packets onward at a fixed rate
                (token bucket). Smooths bursts; finite buffer, so sustained
                overload still spills. Rate-limit vs. scale-concurrency.
+parsers.py     Parser — placed on a node; decodes a "raw" alert into the kind it
+               carries (payload) when the parser handles it. Raw is otherwise
+               unconsumable. Pure data + membership test. Drop-in like gates.
 metrics.py     Telemetry — pure observability backend. World feeds it events +
                per-wave samples; aggregates KindFlow/NodeLoad/Latency(Histogram)/
                Trend/Efficiency. summarize_failure() -> incident post-mortem.
@@ -53,23 +57,31 @@ syntax.py      spans(line) -> tokens for editor highlighting. Pure.
 maps.py        Graph topology: Node + directed adj, source/sink, edge_len,
                nearest_node, and editing (add/remove node/edge, cycle-checked,
                copy()). Built-in maps incl. branching (delta/trident/cascade).
-simulation.py  World.step() — flow network: packets queue at nodes, turrets
-               drain the queue they're bound to; dual failure (overflow/sink
-               LOSS -> leaks, dwell LATENCY -> health). Owns Bank + wave income.
-               coverage_gaps(), leveling. NO pygame. Fully tested.
+simulation.py  World.step() — flow network: packets queue at nodes, _parse
+               decodes raw, turrets drain their bound queue, _spill routes an
+               overwhelmed node's backlog down a parallel branch (overflow/else);
+               dual failure (overflow/sink LOSS -> leaks, dwell LATENCY ->
+               health). Owns Bank + wave income. coverage_gaps()/parse_gaps().
+               NO pygame. Fully tested.
 editor.py      ArsenalEditor — pure placement/economy state machine: select/queue,
                place/equip/remove by click coords, seed_purchase a loadout. Tested.
-loadout.py     build_loadout(unlocked, slots) -> [Turret]. The player edits this.
+tutorial.py    Tutorial — scripted, stepped onboarding (manual / event / state
+               predicate advance). Pure + tested; render draws the card.
+loadout.py     build_loadout(unlocked, slots) -> [Turret] (plus optional
+               build_gates/limiters/parsers/topology). The player edits this.
 render.py      pygame (the only module with it): draw, tooltips, overlays, the
                editor (E), build mode (T), in-app code editor (C), metrics (M),
-               help (H), coach line, sandbox (K), speed (F), scoring.
+               help (H), coach line, sandbox (K), speed (F), scoring, tutorial.
 llm_assist.py  optional local-LLM diagnostics over stdlib urllib; degrades to a
                friendly message if no model is running. localhost only.
 ```
 
-Dependency direction: packets/arsenal/maps → economy/gates/limiter → simulation
-→ metrics/hints/editor/loadout/llm_assist → render. codebuffer/syntax/scores are
-leaf helpers used by render.
+There are two entry points outside the package: `main.py` (browser/WASM via
+pygbag; async loop) and `serve_web.py` (a static dev server for `build/web`).
+
+Dependency direction: packets/arsenal/maps → economy/gates/limiter/parsers →
+simulation → metrics/hints/editor/loadout/llm_assist → render. tutorial/
+codebuffer/syntax/scores are leaf helpers used by render.
 
 ## Invariants — keep these true
 
@@ -93,21 +105,18 @@ make check     # ruff + mypy + pytest
 
 ## Roadmap (good next tasks)
 
-Done: in-game placement editor (`editor.py`), credit economy (`economy.py`),
-difficulty strategies incl. adaptive waves (`packets.DIFFICULTIES`).
+Done: the flow-network core (graph + queues, turrets drain a node's queue, dwell
+bleeds health); in-game placement editor (`editor.py`); credit economy
+(`economy.py`); difficulty strategies incl. adaptive waves
+(`packets.DIFFICULTIES`); player-designed topology (build mode); gates; parsers
++ the `ingest` difficulty; overflow/`_spill` routing; a browser (WASM) build
+(`main.py` + pygbag); and a guided tutorial (`tutorial.py`) with a clean start.
 
-**Direction — topological v2.** The game is pivoting from a spatial tower-defense
-(turrets target by x/y range along a fixed polyline) toward a *flow network*:
-one map that grows **branches** you design; **gates** that route/pre-filter
-packets by kind (Lambda-style) between branches; turrets that **drain a node's
-queue** rather than target by range; and **queue dwell that bleeds health**
-(SLA/backpressure) as the failure mode instead of leak-at-exit. Build it in
-phases behind the pure/tested core: graph+queues → turrets-serve-queues → gates
-→ latency-drain → branch-building UI. The economy/Bank/editor state machine and
-registries all carry over; spatial `range` fades.
-
-Smaller wins still open: more content (guns/modules/kinds) via the registries;
-richer synergies / clearer unlock UI.
+Open next: keep growing the **training-platform** experience — a teaching coach
+that explains *why* + the fix (not just names it), in-editor Python lessons,
+contextual "what is this?" help; more content (guns/modules/kinds) via the
+registries; richer synergies / clearer unlock UI; browser persistence
+(IndexedDB) for saved builds and high scores.
 
 Touch the pure modules for behavior (with tests), then render.py for UI. Keep
 them separable.

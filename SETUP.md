@@ -5,9 +5,11 @@ different kinds that flood a map; **turrets** are typed consumers that can only
 process the kinds their **gun** accepts. You win by composing guns, modules, and
 placements so your coverage and throughput absorb the flood.
 
-New here? A short **walkthrough** appears on launch (press any key to start),
-and a live **COACH** line at the bottom-left always names the most important
-thing to fix right now — press `M` for the full coaching list and metrics.
+New here? A **guided, step-by-step tutorial** runs on the first launch (it docks
+at the bottom so the board stays clickable), and a live **COACH** line at the
+bottom-left always names the most important thing to fix right now — press `M`
+for the full coaching list and metrics. The board starts **clean**: you build
+the pipeline yourself, or press `F5` to load the example `loadout.py`.
 
 ## Install & run
 
@@ -15,11 +17,26 @@ thing to fix right now — press `M` for the full coaching list and metrics.
 python -m venv .venv
 source .venv/bin/activate           # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"             # or: pip install -r requirements.txt
-python -m chokepoint           # launch
-make check                          # ruff + mypy + 15 tests, all green
+python -m chokepoint                # launch
+make check                          # ruff + mypy + tests, all green
 ```
 
 Requires Python 3.11+ and pygame 2.6+.
+
+### Play in the browser (optional)
+
+The game also builds to WebAssembly with [pygbag](https://pypi.org/project/pygbag/),
+so it runs in a browser with no install for players:
+
+```bash
+pip install -e ".[web]"
+python -m pygbag --build main.py    # emits build/web/
+python serve_web.py                 # http://localhost:8000  (and http://<your-lan-ip>:8000)
+```
+
+`serve_web.py` is a small static server tuned for the pygbag build (it proxies
+the runtime, fixes the WASM mimetype, and snaps the device-pixel-ratio so text
+stays crisp on scaled displays). The desktop build is unaffected.
 
 ## Controls
 
@@ -27,7 +44,7 @@ Requires Python 3.11+ and pygame 2.6+.
 |----------|------------------------------------------|
 | `[` `]`  | previous / next map                      |
 | `R`      | reset the run                            |
-| `P`      | pause / resume  (`.` steps one tick)     |
+| `P`/`SPACE` | begin the pending wave; pause / resume (`.` steps one tick) |
 | `E`      | toggle the in-game placement editor      |
 | `G` `B`  | in editor: select gate / quelimiter      |
 | `X`      | in editor: clear all placements (refund) |
@@ -36,7 +53,7 @@ Requires Python 3.11+ and pygame 2.6+.
 | `M`      | toggle the metrics dashboard             |
 | `H`      | help overlay (controls + legend)         |
 | `S`      | save your build + topology to `loadout.py`|
-| `D`      | cycle difficulty (calm/easy/adaptive/overkill)|
+| `D`      | cycle difficulty (calm/easy/adaptive/overkill/ingest)|
 | `F`      | fast-forward (1x / 2x / 3x)              |
 | `K`      | sandbox: free credits to experiment      |
 | `F5`     | reload your `loadout.py` (after editing) |
@@ -92,14 +109,34 @@ throughput, so you size typed consumers to the load instead of over-provisioning
 
 ## Difficulty (press `D` to cycle)
 
-Three load profiles for the incoming flood:
+Load profiles for the incoming flood:
 
+- **calm** — gentler than easy; fewer packets, looser gaps. A learning pace.
 - **easy** — a steady ramp; the curated intro waves then a gentle endless tail.
 - **adaptive** — presses your weak spot: the next wave piles on whichever kind
   has leaked the most so far. A load generator probing your coverage gap.
 - **overkill** — more volume and tighter bursts across the board.
+- **ingest** — the easy baseline plus a stream of **raw** alerts you must decode
+  with **parsers** before any turret can handle them (see below).
 
-Cycling difficulty resets the run.
+Each wave starts **paused** on a preview of what's incoming — build or adjust,
+then press `P` or `SPACE` to begin. Cycling difficulty resets the run.
+
+## Parsers & overflow routing
+
+**Parsers** are the ingest stage. On the `ingest` difficulty, some alerts arrive
+as `raw` — unparsed, and no turret accepts them. A parser placed on a node
+**decodes** a raw alert into its real kind (the one it secretly carries) so a
+consumer can finally take it. Like consumer coverage, parsers only handle the
+payload kinds you give them: an undecoded raw alert flows on and leaks. Define
+them in code with `build_parsers(unlocked, slots)` in `loadout.py`.
+
+**Overflow ("spill") routing** is your *else* path. When a node's turret can't
+keep up and its queue for a kind backs up, the excess automatically routes down
+a parallel branch that reaches **another** consumer of that kind — instead of
+piling up and dropping. You design it by building the parallel branch (press `T`,
+add a node and edge, place a backup turret); the engine load-balances onto it.
+No parallel consumer means no spill, so traffic is never shed into a dead end.
 
 ## Metrics & the failure debrief
 

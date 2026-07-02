@@ -26,7 +26,8 @@ from .gates import Gate
 from .limiter import Limiter
 from .maps import Graph
 from .metrics import Telemetry
-from .packets import DIFFICULTIES, KIND_LIST, WAVES, Packet
+from .packets import CONSUMABLE_KINDS, DIFFICULTIES, KIND_LIST, WAVES, Packet
+from .parsers import RAW_KIND, Parser
 
 PACKET_VOLUME = 12.0
 PACKET_SPEED = 60.0
@@ -35,6 +36,7 @@ PACKET_SPEED = 60.0
 MAX_LEAK = 12              # dropped/overflowed packets that end the run
 START_HEALTH = 100.0       # latency budget; bleeds while packets dwell too long
 QUEUE_CAP = 8              # packets a node holds before it overflows (a drop)
+SPILL_AT = 4               # served packets waiting beyond this spill to a parallel branch
 DWELL_GRACE = 3.0          # seconds a packet may queue before it bleeds health
 DWELL_DRAIN = 3.0          # health/sec drained per packet queued past the grace
 
@@ -66,6 +68,7 @@ class World:
         self.turrets: list[Turret] = []
         self.gates: list[Gate] = []
         self.limiters: list[Limiter] = []
+        self.parsers: list[Parser] = []
         self.difficulty = difficulty
         self.starting_credits = starting_credits
         # Created once and kept across resets; the editor holds this same object
@@ -104,11 +107,22 @@ class World:
     def limiter_at(self, node_id: str) -> Limiter | None:
         return next((lim for lim in self.limiters if lim.node == node_id), None)
 
+    def set_parsers(self, parsers: list[Parser]) -> None:
+        """Place parsers and bind each to its nearest node."""
+        self.parsers = parsers
+        for i, ps in enumerate(parsers):
+            ps.id = f"P{i + 1}"
+            ps.node = self.map.nearest_node(ps.x, ps.y)
+
+    def parser_at(self, node_id: str) -> Parser | None:
+        return next((ps for ps in self.parsers if ps.node == node_id), None)
+
     def rebind(self) -> None:
         """Re-snap all placed devices to the current nodes (after a topology edit)."""
         self.set_turrets(self.turrets)
         self.set_gates(self.gates)
         self.set_limiters(self.limiters)
+        self.set_parsers(self.parsers)
         self.autoroute()
 
     def autoroute(self) -> None:
@@ -146,6 +160,9 @@ class World:
         self.packets: list[Packet] = []
         self.wave_idx = 0
         self.leaks = 0
+        self.parsed = 0                       # raw alerts decoded by parsers this run
+        self._raw_payloads: list[str] = []    # rotation of payloads for raw spawns
+        self._raw_i = 0
         self.health = START_HEALTH
         self.spawn_q: list[tuple[float, str]] = []
         self.spawn_clock = 0.0
@@ -189,9 +206,22 @@ class World:
         return cov
 
     def coverage_gaps(self) -> set[str]:
-        """Kinds that have appeared but no turret can process."""
-        seen = {k for k, s in self.stats.items() if s.spawned > 0}
+        """Typed kinds that have appeared but no turret can process.
+
+        ``raw`` is excluded — decoding it is a parser's job, surfaced separately
+        by ``parse_gaps`` — so a missing parser doesn't masquerade as a missing
+        turret.
+        """
+        seen = {k for k, s in self.stats.items() if s.spawned > 0 and k != RAW_KIND}
         return seen - set(self.coverage())
+
+    def parse_gaps(self) -> set[str]:
+        """Payload kinds carried by raw alerts in flight that no parser can decode."""
+        handled: set[str] = set().union(*(ps.handles for ps in self.parsers)) \
+            if self.parsers else set()
+        pending = {p.payload for p in self.packets
+                   if p.kind == RAW_KIND and p.payload and not p.dead}
+        return pending - handled
 
     def queue_at(self, node_id: str) -> list[Packet]:
         """Packets currently queued (not in transit, not dead) at a node, FIFO."""
@@ -215,6 +245,11 @@ class World:
         q.sort()
         self.spawn_q = q
         self.spawn_clock = 0.0
+        # raw alerts hide a real kind as their payload; rotate over the consumable
+        # kinds this wave actually contains (fall back to all consumable kinds).
+        present = [k for k, *_ in groups if k != RAW_KIND]
+        self._raw_payloads = list(dict.fromkeys(present)) or list(CONSUMABLE_KINDS)
+        self._raw_i = 0
 
     # ---- main step ---- #
     def step(self, dt: float) -> None:
@@ -222,7 +257,9 @@ class World:
             return
         self._spawn(dt)
         self._transit(dt)
+        self._parse(dt)
         self._process(dt)
+        self._spill(dt)
         self._route_and_dwell(dt)
         self._release_limiters(dt)
         self._overflow()
@@ -240,12 +277,29 @@ class World:
         self.spawn_clock += dt
         while self.spawn_q and self.spawn_clock >= self.spawn_q[0][0]:
             _, kind = self.spawn_q.pop(0)
+            payload = ""
+            if kind == RAW_KIND and self._raw_payloads:
+                payload = self._raw_payloads[self._raw_i % len(self._raw_payloads)]
+                self._raw_i += 1
             self.packets.append(
-                Packet(kind, PACKET_VOLUME, PACKET_VOLUME, PACKET_SPEED, at=self.map.source)
+                Packet(kind, PACKET_VOLUME, PACKET_VOLUME, PACKET_SPEED,
+                       at=self.map.source, payload=payload)
             )
             self.stats[kind].spawned += 1
             self.telemetry.on_spawn(kind, self.wave_idx)
             self.started = True
+
+    def _parse(self, dt: float) -> None:
+        """Each parser decodes queued raw alerts whose payload it handles: the
+        packet is retyped to its real kind so a turret can then serve it."""
+        for p in self.packets:
+            if p.dead or p.moving_to is not None or p.kind != RAW_KIND:
+                continue
+            parser = self.parser_at(p.at)
+            if parser is not None and parser.can_parse(p.payload):
+                p.kind, p.payload = p.payload, ""
+                p.wait = 0.0           # decoded; its dwell clock starts fresh as a typed alert
+                self.parsed += 1
 
     def _transit(self, dt: float) -> None:
         """Advance in-transit packets; on arrival they join the next node's queue."""
@@ -277,6 +331,35 @@ class World:
                     target.dead = True
                     self.stats[target.kind].handled += 1
                     self.telemetry.on_handle(target.kind, t.node, self.wave_idx, target.wait)
+
+    def _spill(self, dt: float) -> None:
+        """Overflow routing ("else"): when a node's turret is saturated, send the
+        backlog of a served kind down a branch that reaches another consumer of
+        that kind, instead of letting it pile up and drop. This is the load-shed
+        you design by building a parallel branch with a backup turret — the
+        engine balances onto it automatically once the primary can't keep up.
+        """
+        for node_id in self.map.nodes:
+            outs = self.map.branches(node_id)
+            if not outs:
+                continue
+            served_kinds: set[str] = set()
+            for t in self.turrets:
+                if t.node == node_id:
+                    served_kinds |= t.accepts()
+            if not served_kinds:
+                continue
+            queue = self.queue_at(node_id)
+            for kind in served_kinds:
+                waiting = [p for p in queue if p.kind == kind and not p.handled]
+                excess = len(waiting) - SPILL_AT
+                if excess <= 0:
+                    continue
+                overflow = next((b for b in outs if self._branch_reaches_server(b, kind)), None)
+                if overflow is None:
+                    continue                       # no parallel consumer to spill to
+                for p in waiting[:excess]:         # oldest first
+                    p.moving_to, p.seg_pos, p.wait = overflow, 0.0, 0.0
 
     def _dispatch(self, p: Packet) -> None:
         """Send a queued packet onward (gate-routed at a fork); leak it at the sink."""

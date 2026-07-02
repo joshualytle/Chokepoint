@@ -22,8 +22,13 @@ KINDS: dict[str, dict] = {
     "email":      {"color": (235, 215, 90),  "desc": "Email-security / phishing-report alerts."},
     "waf":        {"color": (0, 200, 200),    "desc": "Web-app firewall / injection hits."},
     "vuln":       {"color": (255, 120, 200),  "desc": "Vulnerability-scan findings to triage."},
+    "raw":        {"color": (120, 132, 148),
+                   "desc": "Unparsed raw alert — a parser must decode it to its real kind."},
 }
 KIND_LIST: list[str] = list(KINDS)
+
+# kinds a turret can actually consume (everything except the unparsed "raw").
+CONSUMABLE_KINDS: list[str] = [k for k in KIND_LIST if k != "raw"]
 
 
 @dataclass
@@ -47,6 +52,7 @@ class Packet:
     wait: float = 0.0           # seconds spent queued at the current node (dwell)
     dead: bool = False
     handled: bool = False
+    payload: str = ""           # for a "raw" packet: the real kind a parser decodes it to
 
 
 # Wave streams: (kind, count, gap_seconds, delay_seconds). Tight gaps + high
@@ -148,10 +154,24 @@ def adaptive_wave(wave_idx: int, leaked: dict[str, int]) -> Wave:
     return [*base, burst]
 
 
+def ingest_wave(wave_idx: int, leaked: dict[str, int]) -> Wave:
+    """The Easy baseline plus a stream of unparsed ``raw`` alerts.
+
+    Raw alerts can't be consumed by any turret — you must place parsers
+    (``build_parsers`` in your loadout) to decode them into their real kind
+    first. The raw volume grows with the wave, so parse-coverage has to keep up.
+    Each raw packet's hidden payload kind is assigned at spawn time by the World.
+    """
+    base = easy_wave(wave_idx, leaked)
+    raw_count = 6 + wave_idx * 2
+    return [*base, ("raw", raw_count, 0.5, 1.0)]
+
+
 DIFFICULTIES: dict[str, WaveStrategy] = {
     "easy": easy_wave,
     "adaptive": adaptive_wave,
     "overkill": overkill_wave,
     "calm": calm_wave,
+    "ingest": ingest_wave,
 }
 DIFFICULTY_LIST: list[str] = list(DIFFICULTIES)

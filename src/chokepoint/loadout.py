@@ -14,6 +14,7 @@ Return a list of Turret objects. Placement lives on each turret (its x, y).
 from __future__ import annotations
 
 from .arsenal import MODULE_LIBRARY, Turret, make_gun
+from .parsers import Parser
 
 
 def build_loadout(unlocked: set[str], slots: list[tuple[float, float]]) -> list[Turret]:
@@ -42,3 +43,19 @@ def build_loadout(unlocked: set[str], slots: list[tuple[float, float]]) -> list[
     #         turrets.append(Turret(360, 300, gun=make_gun("lance")))
 
     return turrets
+
+
+def build_parsers(unlocked: set[str], slots: list[tuple[float, float]]) -> list[Parser]:
+    """Parsers decode raw alerts into typed kinds (the "ingest" difficulty, D).
+
+    A raw alert can't be consumed until a parser placed on its node decodes it.
+    Place a parser early (near the source) and list the payload kinds it
+    ``handles`` so traffic is typed before it reaches your turrets.
+
+    PARSE GAP ON PURPOSE: this parser doesn't decode "endpoint", so raw endpoint
+    alerts stay raw and leak. Add it to handles (or place a second parser) to fix:
+    """
+    return [
+        Parser(*slots[0], handles={"auth", "ids", "dns", "firewall", "email",
+                                   "cloudtrail", "waf", "vuln"}),
+    ]

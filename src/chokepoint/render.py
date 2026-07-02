@@ -45,6 +45,7 @@ from .codebuffer import TextBuffer
 from .editor import ArsenalEditor
 from .gates import DEFAULT_GATE_COST
 from .hints import coaching
+from .lessons import Lessons
 from .limiter import DEFAULT_LIMITER_COST
 from .maps import GW, MAP_LIST, MAPS
 from .metrics import summarize_failure
@@ -74,6 +75,7 @@ async def main() -> None:  # pragma: no cover - needs a display
     pygame.init()
     pygame.key.set_repeat(250, 30)
     WIN_W, WIN_H = 1100, 680
+    LESSON_X = int(WIN_W * 0.56)   # left edge of the lessons panel in the code editor
     screen = pygame.display.set_mode((WIN_W, WIN_H))
     pygame.display.set_caption("Chokepoint — typed turrets vs an alert flood")
     clock = pygame.time.Clock()
@@ -122,6 +124,10 @@ async def main() -> None:  # pragma: no cover - needs a display
     tutorial = Tutorial()        # guided onboarding; freezes the sim until done/skipped
     tut_next: Any = None         # Rect of the on-screen Next/Start button (set while drawing)
     tut_skip: Any = None         # Rect of the Skip button
+    lessons = Lessons()          # in-editor Python lessons (shown beside the C editor)
+    les_next: Any = None         # Rects for the lessons panel buttons (set while drawing)
+    les_skip: Any = None
+    les_start: Any = None
     speed = 1                    # sim speed multiplier (F cycles 1x/2x/3x)
     sandbox = False              # practice mode: free credits to experiment (K)
     prev_wave = 0                # to announce wave clears
@@ -427,8 +433,18 @@ async def main() -> None:  # pragma: no cover - needs a display
                         editor.select_gun(guns[idx])
             elif ev.type == pygame.MOUSEWHEEL and code_mode:
                 code_scroll = max(0, code_scroll - ev.y * 3)  # scroll the code view
-            elif ev.type == pygame.MOUSEBUTTONDOWN and code_mode and ev.button == 1:
-                mx, my = ev.pos  # click to position the caret in the editor
+            elif (ev.type == pygame.MOUSEBUTTONDOWN and code_mode and ev.button == 1
+                  and les_next is not None and les_next.collidepoint(ev.pos)):
+                lessons.next()
+            elif (ev.type == pygame.MOUSEBUTTONDOWN and code_mode and ev.button == 1
+                  and les_skip is not None and les_skip.collidepoint(ev.pos)):
+                lessons.skip()
+            elif (ev.type == pygame.MOUSEBUTTONDOWN and code_mode and ev.button == 1
+                  and les_start is not None and les_start.collidepoint(ev.pos)):
+                lessons.start()
+            elif (ev.type == pygame.MOUSEBUTTONDOWN and code_mode and ev.button == 1
+                  and ev.pos[0] < LESSON_X - 14):  # caret positioning in the code area only
+                mx, my = ev.pos
                 top, left = 56, 52
                 r = code_scroll + (my - top) // 16
                 if my >= top and 0 <= r < len(code_buf.lines):
@@ -1030,6 +1046,7 @@ async def main() -> None:  # pragma: no cover - needs a display
 
         # in-app code editor (toggle C): edit loadout.py, Ctrl+S to apply
         if code_mode:
+            les_next = les_skip = les_start = None
             ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
             ov.fill((6, 10, 16, 246))
             screen.blit(ov, (0, 0))
@@ -1058,6 +1075,48 @@ async def main() -> None:  # pragma: no cover - needs a display
                 if i == code_buf.row:  # caret
                     cx = 52 + F_S.size(code_buf.lines[i][: code_buf.col])[0]
                     pygame.draw.line(screen, PHOS, (cx, y), (cx, y + 14), 1)
+
+            # ---- Python lessons panel (right side of the editor) ----
+            lx, lw = LESSON_X, WIN_W - LESSON_X - 16
+            pygame.draw.line(screen, GRID, (lx - 14, 40), (lx - 14, WIN_H - 16), 1)
+            if lessons.active and lessons.lesson is not None:
+                lessons.check(world, editor)   # live-update the ✓ as the board changes
+                le = lessons.lesson
+                text(f"PYTHON LESSONS   {lessons.i + 1}/{len(lessons.script)}",
+                     lx, 12, F_S, MUTED)
+                text(le.title, lx, 38, F_M, PHOS)
+                yy = 66
+                for para in le.teach:
+                    for ln in wrap(para, lw, F_S):
+                        text(ln, lx, yy, F_S, INK)
+                        yy += 16
+                    yy += 5
+                text("TASK", lx, yy, F_S, AMBER)
+                yy += 18
+                for ln in wrap(le.task, lw, F_S):
+                    text(ln, lx, yy, F_S, INK)
+                    yy += 16
+                if le.concept:
+                    yy += 6
+                    text(f"concept: {le.concept}", lx, yy, F_S, MUTED)
+                    yy += 22
+                if le.check is not None:
+                    text("done!" if lessons.passed else "try it, then Ctrl+S to run & check",
+                         lx, yy, F_S, PHOS if lessons.passed else MUTED)
+                les_skip = pygame.Rect(lx, WIN_H - 42, 108, 24)
+                pygame.draw.rect(screen, MUTED, les_skip, 1, border_radius=4)
+                text("Skip lessons", les_skip.x + 8, les_skip.y + 4, F_S, MUTED)
+                if lessons.can_advance():
+                    label = "Finish" if lessons.i == len(lessons.script) - 1 else "Next"
+                    les_next = pygame.Rect(lx + lw - 96, WIN_H - 42, 96, 24)
+                    pygame.draw.rect(screen, PHOS, les_next, border_radius=4)
+                    text(f"{label}  >", les_next.x + 14, les_next.y + 4, F_S, PANEL2)
+            else:
+                text("PYTHON LESSONS", lx, 12, F_S, MUTED)
+                text("A guided tour of the Python in loadout.py.", lx, 40, F_S, INK)
+                les_start = pygame.Rect(lx, 74, 132, 26)
+                pygame.draw.rect(screen, PHOS, les_start, border_radius=4)
+                text("Start lessons", les_start.x + 12, les_start.y + 5, F_S, PANEL2)
 
         if not world.over:
             end_score["saved"] = False  # arm scoring for the next game-over

@@ -67,6 +67,12 @@ register_module(Module("adapter_vuln", "Lets a gun also accept vulnerability fin
                        unlock_wave=6, add_accepts=frozenset({"vuln"}), cost=75))
 register_module(Module("boost", "Boost: +8 processing per shot.",
                        unlock_wave=4, damage_bonus=8, cost=85))
+register_module(Module("cache", "Cache: collapses reprocessing, +7 effective processing.",
+                       unlock_wave=5, damage_bonus=7, cost=75))
+register_module(Module("adapter_ids", "Lets a gun also accept IDS signatures.",
+                       unlock_wave=2, add_accepts=frozenset({"ids"}), cost=55))
+register_module(Module("adapter_firewall", "Lets a gun also accept firewall traffic.",
+                       unlock_wave=3, add_accepts=frozenset({"firewall"}), cost=55))
 
 
 # --------------------------------------------------------------------------- #
@@ -182,6 +188,27 @@ def correlator() -> Gun:
                accepts=frozenset({"auth", "cloudtrail"}), unlock_wave=5, cost=210)
 
 
+@register_gun("warden")
+def warden() -> Gun:
+    return Gun("warden", "Perimeter defense for firewall and web-app-firewall traffic.",
+               fire_rate=3.0, damage=6, base_range=150,
+               accepts=frozenset({"firewall", "waf"}), unlock_wave=5, cost=165)
+
+
+@register_gun("relay")
+def relay() -> Gun:
+    return Gun("relay", "Comms watch for DNS and email-security alerts.",
+               fire_rate=3.0, damage=6, base_range=150,
+               accepts=frozenset({"dns", "email"}), unlock_wave=3, cost=150)
+
+
+@register_gun("analyst")
+def analyst() -> Gun:
+    return Gun("analyst", "Detection triage for IDS signatures and vulnerability findings.",
+               fire_rate=2.5, damage=8, base_range=160,
+               accepts=frozenset({"ids", "vuln"}), unlock_wave=6, cost=175)
+
+
 def make_gun(name: str) -> Gun:
     """Build a fresh gun instance from the library by name."""
     if name not in GUN_LIBRARY:
@@ -243,6 +270,12 @@ SYNERGIES: list[Synergy] = [
             "WAF + vuln triage reinforce each other. +20% throughput to both.", 1.20),
     Synergy(frozenset({"correlator", "scatter"}), "Signal fusion",
             "Correlation + broad coverage. +15% throughput to both.", 1.15),
+    Synergy(frozenset({"warden", "scatter"}), "Perimeter fusion",
+            "Perimeter + broad coverage reinforce each other. +15% throughput to both.", 1.15),
+    Synergy(frozenset({"relay", "quarantine"}), "Comms watch",
+            "DNS + email correlation. +15% throughput to both.", 1.15),
+    Synergy(frozenset({"analyst", "sentinel"}), "Triage stack",
+            "Detection + vuln triage stack up. +15% throughput to both.", 1.15),
 ]
 
 

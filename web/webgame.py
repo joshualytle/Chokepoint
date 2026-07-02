@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 
 from chokepoint.arsenal import MODULE_LIBRARY, Module, Turret, make_gun
+from chokepoint.hints import coaching
 from chokepoint.maps import MAP_LIST, MAPS
 from chokepoint.packets import DIFFICULTY_LIST, KINDS
 from chokepoint.parsers import Parser
@@ -110,12 +111,15 @@ def snapshot() -> dict:
              for k, s in w.stats.items() if s.spawned}
     upcoming = [{"kind": k, "n": n, "color": list(KINDS[k]["color"])}
                 for k, n in w.upcoming_kinds().items()]
+    coach = [{"text": h.text, "level": h.level, "why": h.why, "fix": h.fix,
+              "concept": h.concept} for h in coaching(w)[:4]]
     return {
         "map": m.name, "wave": w.level, "difficulty": w.difficulty,
         "health": round(w.health, 1), "max_health": START_HEALTH,
         "leaks": w.leaks, "max_leaks": MAX_LEAK, "credits": w.bank.balance,
         "coverage_gaps": gaps, "over": w.over, "won": w.won, "paused": w.paused,
-        "started": w.started, "upcoming": upcoming,
+        "started": w.started, "upcoming": upcoming, "coach": coach,
+        "unlocked": sorted(w.unlocked()),
         "nodes": nodes, "edges": edges, "packets": packets,
         "turrets": turrets, "stats": stats,
     }

@@ -13,6 +13,7 @@ const rgb = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
 
 const el = (id) => document.getElementById(id);
 let G = null;                              // Python bridge function handles
+let cm = null;                             // CodeMirror editor instance
 let running = false, over = false;
 let last = performance.now();
 
@@ -49,6 +50,11 @@ async function boot() {
   fillSelect(el("mapSel"), meta.maps, "trunk");
   fillSelect(el("diffSel"), meta.difficulties, "easy");
   el("code").value = DEFAULT_LOADOUT;
+  cm = CodeMirror.fromTextArea(el("code"), {
+    mode: "python", theme: "material-darker", lineNumbers: true,
+    indentUnit: 4, matchBrackets: true, autofocus: false,
+    extraKeys: { "Ctrl-Enter": applyLoadout, "Cmd-Enter": applyLoadout },
+  });
   applyLoadout();
 
   wireUI();
@@ -74,7 +80,8 @@ function newGame() {
 }
 
 function applyLoadout() {
-  const res = JSON.parse(G.load_loadout(el("code").value));
+  const src = cm ? cm.getValue() : el("code").value;
+  const res = JSON.parse(G.load_loadout(src));
   const s = el("codeStatus");
   if (res.ok) { s.textContent = `deployed ${res.turrets} turret(s)`; s.className = "code-status ok"; }
   else { s.textContent = res.error; s.className = "code-status err"; }
@@ -90,17 +97,7 @@ function wireUI() {
   el("resetBtn").onclick = newGame;
   el("mapSel").onchange = newGame;
   el("diffSel").onchange = newGame;
-  el("runBtn").onclick = applyLoadout;
-  el("code").addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); applyLoadout(); }
-    if (e.key === "Tab") { e.preventDefault(); insertAtCursor(el("code"), "    "); }
-  });
-}
-
-function insertAtCursor(ta, text) {
-  const s = ta.selectionStart, e = ta.selectionEnd;
-  ta.value = ta.value.slice(0, s) + text + ta.value.slice(e);
-  ta.selectionStart = ta.selectionEnd = s + text.length;
+  el("runBtn").onclick = applyLoadout;   // CodeMirror handles Ctrl/Cmd-Enter + Tab
 }
 
 function frame(now) {
@@ -184,7 +181,8 @@ function updateHUD(s) {
     <table class="kinds">
       <tr><th>KIND</th><th>in</th><th>ok</th><th>leak</th><th>now</th></tr>
       ${rows || `<tr><td colspan="5" style="color:var(--muted)">no traffic yet</td></tr>`}
-    </table>`;
+    </table>
+    ${coachHtml(s)}`;
 
   // wave / start prompt over the board
   const msg = el("waveMsg");
@@ -193,6 +191,19 @@ function updateHUD(s) {
     const up = s.upcoming.map((u) => `${u.kind}×${u.n}`).join("  ");
     msg.textContent = `Wave ${s.wave} ready — press Start.  incoming: ${up}`;
   } else msg.textContent = "";
+}
+
+function coachHtml(s) {
+  if (!s.coach || !s.coach.length) return "";
+  const h = s.coach[0];
+  const lc = { danger: "var(--danger)", warn: "var(--amber)", tip: "var(--phos)", ok: "var(--phos)" }[h.level] || "var(--ink)";
+  if (h.level === "ok") return `<div class="coach ok">COACH: ${h.text}</div>`;
+  return `<div class="coach" style="border-color:${lc}">
+    <div class="coach-head" style="color:${lc}">COACH ▸ ${h.text}</div>
+    ${h.why ? `<div class="coach-line"><b>WHY</b> ${h.why}</div>` : ""}
+    ${h.fix ? `<div class="coach-line coach-fix"><b>FIX</b> ${h.fix}</div>` : ""}
+    ${h.concept ? `<div class="coach-concept">concept: ${h.concept}</div>` : ""}
+  </div>`;
 }
 
 boot().catch((e) => { el("boot-sub").textContent = "error: " + e; console.error(e); });

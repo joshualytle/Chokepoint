@@ -207,10 +207,28 @@ async def main() -> None:  # pragma: no cover - needs a display
         nx, ny = world.map.pos(nid)
         return nid if (nx - mx) ** 2 + (ny - my) ** 2 <= NODE_PICK * NODE_PICK else None
 
+    def edge_under(mx: int, my: int, tol: float = 8.0) -> tuple[str, str] | None:
+        """The edge (src, dst) whose line passes nearest the click, within tol px."""
+        best: tuple[str, str] | None = None
+        best_d = tol
+        for src, dst in world.map.edges():
+            ax, ay = world.map.pos(src)
+            bx, by = world.map.pos(dst)
+            dx, dy = bx - ax, by - ay
+            seg2 = dx * dx + dy * dy
+            t = 0.0 if seg2 == 0 else max(0.0, min(1.0, ((mx - ax) * dx + (my - ay) * dy) / seg2))
+            d = math.hypot(mx - (ax + t * dx), my - (ay + t * dy))
+            if d < best_d:
+                best_d, best = d, (src, dst)
+        return best
+
     def topology_edited() -> None:
-        """After a structural change: drop in-flight packets (they may reference a
-        removed node) and re-snap devices."""
-        world.packets.clear()
+        """After a structural change, re-snap devices and drop ONLY packets that now
+        reference a removed node — so adding a branch mid-wave no longer wipes the
+        alerts already in flight."""
+        valid = world.map.nodes
+        world.packets = [p for p in world.packets
+                         if p.at in valid and (p.moving_to is None or p.moving_to in valid)]
         world.rebind()
 
     def apply_code(src: str) -> None:
@@ -567,14 +585,26 @@ async def main() -> None:  # pragma: no cover - needs a display
                         else:
                             say("edge rejected (would loop, or duplicate)", ok=False)
                         edge_src = None
-                elif ev.button == 3:                  # remove a node
-                    if picked is not None and world.map.remove_node(picked):
-                        topology_edited()
-                        say(f"removed {picked}")
+                elif ev.button == 3:                  # cancel a pending edge, or remove
+                    if edge_src is not None:
+                        edge_src = None
+                        say("edge cancelled")
+                    elif picked is not None:
+                        if world.map.remove_node(picked):
+                            topology_edited()
+                            say(f"removed node {picked}")
+                        else:
+                            say("can't remove that node (source/sink or the only path)",
+                                ok=False)
                     else:
-                        say("can't remove — source/sink, empty space, or the only path",
-                            ok=False)
-                    edge_src = None
+                        e = edge_under(mx, my)
+                        if e is None:
+                            say("right-click a node or an edge to remove it", ok=False)
+                        elif world.map.remove_edge(*e):
+                            topology_edited()
+                            say(f"removed edge {e[0]}→{e[1]}")
+                        else:
+                            say("can't remove that edge — it's the only path", ok=False)
 
         # keep the editor palette in step with what the current wave has unlocked
         editor.set_unlocked(world.unlocked())
@@ -744,10 +774,10 @@ async def main() -> None:  # pragma: no cover - needs a display
                 pygame.draw.line(screen, PHOS, (ex, ey), mouse, 2)
             text("BUILD MODE (T) — branch off the line:", 12, 12, F_S, PHOS)
             if edge_src is None:
-                text("1) click empty space = new node   2) click one node, then another "
-                     "= connect   ·   RMB a node = remove", 12, 30, F_S, MUTED)
+                text("click empty = new node · click node then node = connect · "
+                     "RMB node/edge = remove", 12, 30, F_S, MUTED)
             else:
-                text(f"picked {edge_src} — now click the node to connect it to.",
+                text(f"picked {edge_src} — click the node to connect it to  (RMB cancels).",
                      12, 30, F_S, AMBER)
 
         if ((world.intermission > 0 or awaiting_start) and not world.over
@@ -797,6 +827,10 @@ async def main() -> None:  # pragma: no cover - needs a display
             text(toast["text"], 12, WIN_H - 60, F_S, PHOS if toast["ok"] else DANGER)
 
         # ---- panel ----  (hover any stat/kind for a plain-language explanation)
+        # solid panel background + divider: a clear boundary so playfield text and
+        # top-strip overlays can't bleed across into the stats.
+        pygame.draw.rect(screen, (10, 17, 28), (GW, 0, WIN_W - GW, WIN_H))
+        pygame.draw.line(screen, GRID, (GW, 0), (GW, WIN_H), 1)
         help_hits.clear()
         pw_stat = WIN_W - PANEL_X - 14
         text("CHOKEPOINT", PANEL_X, 16, F_M, PHOS)
@@ -1206,7 +1240,8 @@ async def main() -> None:  # pragma: no cover - needs a display
         if not world.over:
             end_score["saved"] = False  # arm scoring for the next game-over
 
-        if world.paused and not world.over and not code_mode:
+        if (world.paused and not world.over and not code_mode and not build_mode
+                and not awaiting_start):   # build header / wave-preview own the top strip
             text("|| PAUSED — P resume · . step one tick", GW // 2 - 130, 36, F_M, AMBER)
 
         if world.over and not code_mode:

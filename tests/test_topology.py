@@ -85,6 +85,16 @@ def test_remove_node_allowed_when_a_parallel_path_remains():
     assert g.reachable("n0", "n3")
 
 
+def test_remove_edge_allowed_when_a_parallel_path_remains():
+    g = build_graph("diamond",
+                    {"n0": (0, 0), "a": (100, -50), "b": (100, 50), "n3": (200, 0)},
+                    edges=[("n0", "a"), ("n0", "b"), ("a", "n3"), ("b", "n3")],
+                    source="n0", sink="n3", slots=[(100, 0)])
+    assert g.remove_edge("a", "n3") is True   # a branch edge; n0->b->n3 still connects
+    assert ("a", "n3") not in g.edges()
+    assert g.reachable("n0", "n3")
+
+
 def test_cannot_strand_the_pipeline():
     # a bare trunk has a single path; removing the middle node or the only edge
     # would leave incoming alerts nowhere to go, so both are rejected (no change).

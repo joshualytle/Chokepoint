@@ -525,7 +525,8 @@ async def main() -> None:  # pragma: no cover - needs a display
                         topology_edited()
                         say(f"removed {picked}")
                     else:
-                        say("can't remove (source/sink or empty space)", ok=False)
+                        say("can't remove — source/sink, empty space, or the only path",
+                            ok=False)
                     edge_src = None
 
         # keep the editor palette in step with what the current wave has unlocked
@@ -691,9 +692,16 @@ async def main() -> None:  # pragma: no cover - needs a display
             text("src", sx - 9, sy + 18, F_S, GATE_C)
             text("sink", kx - 12, ky + 18, F_S, GATE_C)
             if edge_src is not None:
-                pygame.draw.line(screen, PHOS, world.map.pos(edge_src), mouse, 2)
-            text("BUILD MODE (T) — click empty = node · node→node = edge · RMB node = remove",
-                 12, 14, F_S, PHOS)
+                ex, ey = (int(v) for v in world.map.pos(edge_src))
+                pygame.draw.circle(screen, PHOS, (ex, ey), 18, 2)  # highlight the picked node
+                pygame.draw.line(screen, PHOS, (ex, ey), mouse, 2)
+            text("BUILD MODE (T) — branch off the line:", 12, 12, F_S, PHOS)
+            if edge_src is None:
+                text("1) click empty space = new node   2) click one node, then another "
+                     "= connect   ·   RMB a node = remove", 12, 30, F_S, MUTED)
+            else:
+                text(f"picked {edge_src} — now click the node to connect it to.",
+                     12, 30, F_S, AMBER)
 
         if ((world.intermission > 0 or awaiting_start) and not world.over
                 and not build_mode and not tutorial.active):
@@ -788,10 +796,10 @@ async def main() -> None:  # pragma: no cover - needs a display
         if edit_mode:
             text("EDIT MODE — E to exit", PANEL_X, row, F_S, PHOS)
             row += 18
-            text("drag/click place · LMB turret=equip · RMB remove · X clear all",
+            text("click to place · LMB=equip · RMB=remove · X=clear",
                  PANEL_X, row, F_S, MUTED)
             row += 20
-            text("GUNS — click one, then click a node to place it", PANEL_X, row, F_S, AMBER)
+            text("GUNS — click one, then click a node:", PANEL_X, row, F_S, AMBER)
             row += 20
             for i, name in enumerate(editor.available_guns()):
                 g = make_gun(name)

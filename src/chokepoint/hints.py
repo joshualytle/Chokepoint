@@ -19,8 +19,15 @@ from .simulation import QUEUE_CAP, START_HEALTH
 
 @dataclass
 class Hint:
+    """One piece of coaching. ``text`` is the symptom; ``why``/``fix``/``concept``
+    turn it into a lesson — what's happening, why it matters, what to do, and the
+    pipeline idea behind it."""
+
     text: str
-    level: str  # "danger" | "warn" | "tip" | "ok"
+    level: str          # "danger" | "warn" | "tip" | "ok"
+    why: str = ""       # the concept / why it matters
+    fix: str = ""       # the concrete action to take
+    concept: str = ""   # short concept label, e.g. "consumer coverage"
 
 
 def _gun_accepting(kind: str, unlocked: set[str]) -> str | None:
@@ -49,37 +56,70 @@ def coaching(world: object) -> list[Hint]:
         gun = _gun_accepting(kind, unlocked)
         mod = _module_accepting(kind, unlocked)
         if gun is not None:
-            out.append(Hint(f"'{kind}' is leaking — nothing accepts it. Place a {gun} "
-                             f"(it accepts {kind}).", "danger"))
+            fix = f"Place a {gun} — its gun accepts {kind}."
+            level = "danger"
         elif mod is not None:
-            out.append(Hint(f"'{kind}' is leaking — attach the '{mod}' module to a gun "
-                             f"so it accepts {kind}.", "danger"))
+            fix = f"Attach the '{mod}' module to a gun so it accepts {kind}."
+            level = "danger"
         else:
-            out.append(Hint(f"'{kind}' is leaking and no tool for it is unlocked yet — "
-                             f"clear waves to unlock one.", "warn"))
+            fix = "Clear waves to unlock a tool that accepts it."
+            level = "warn"
+        out.append(Hint(
+            f"'{kind}' is leaking — no turret accepts it.", level,
+            why="Every alert type needs a consumer that accepts it. An uncovered "
+                "type flows untouched to the exit and leaks.",
+            fix=fix, concept="consumer coverage"))
 
-    # 2. bottleneck — a node backing up (covered, but under-provisioned)
+    # 2. parse gaps — raw alerts with no parser to decode them (ingest difficulty)
+    parse_gaps = w.parse_gaps() if hasattr(w, "parse_gaps") else set()
+    for payload in sorted(parse_gaps):
+        out.append(Hint(
+            f"raw '{payload}' alerts can't be decoded — no parser handles them.", "danger",
+            why="Raw alerts are unparsed; a turret can't consume one until a parser "
+                "decodes it into its real kind.",
+            fix=f"Place a parser that handles '{payload}' (build_parsers in loadout.py).",
+            concept="parse coverage"))
+
+    # 3. bottleneck — a node backing up (covered, but under-provisioned)
     worst, depth = "", 0
     for nid in w.map.nodes:                          # type: ignore[attr-defined]
         d = len(w.queue_at(nid))                     # type: ignore[attr-defined]
         if d > depth:
             worst, depth = nid, d
     if depth > QUEUE_CAP - 2:
-        extra = ("" if w.limiter_at(worst)           # type: ignore[attr-defined]
-                 else " — or add a quelimiter (B) upstream to smooth the burst")
-        out.append(Hint(f"Node {worst} is backing up ({depth} queued): add throughput "
-                        f"(another accepting turret, or an 'amp'/'dedup' module){extra}.", "warn"))
+        out.append(Hint(
+            f"Node {worst} is backing up ({depth} queued).", "warn",
+            why="The consumer here can't keep up with inflow, so the queue grows — "
+                "covered, but under-provisioned.",
+            fix="Add throughput (another accepting turret or an 'amp' module), a "
+                "quelimiter (B) to smooth a burst, or a parallel branch (T) with a "
+                "backup turret for overload to spill into.",
+            concept="backpressure / scaling consumers"))
 
-    # 3. latency — health bleeding from aged queues
+    # 4. latency — health bleeding from aged queues
     if w.health < START_HEALTH * 0.85:               # type: ignore[attr-defined]
-        out.append(Hint("Health is dropping: queued alerts are aging out (latency). "
-                        "Relieve the busiest node.", "warn"))
+        out.append(Hint(
+            "Health is dropping — queued alerts are aging out.", "warn",
+            why="Alerts that dwell past the grace period bleed your latency budget — "
+                "the SLA/backpressure failure.",
+            fix="Relieve the busiest node: more or faster consumers, a limiter, or a "
+                "spill branch.",
+            concept="latency / dwell"))
 
-    # 4. routing — a fork with no gate wastes the branches
+    # 5. routing — a fork with no gate wastes the branches
     if w.map.branching_nodes() and not w.gates:      # type: ignore[attr-defined]
-        out.append(Hint("This map forks. Place a gate (G) at the fork so each kind flows "
-                        "down a lane that can handle it.", "tip"))
+        out.append(Hint(
+            "This map forks but has no gate.", "tip",
+            why="Without routing, every kind takes the default branch. A gate "
+                "pre-filters by type so each consumer only sees relevant traffic.",
+            fix="Place a gate (G) at the fork to route each kind down a lane that "
+                "handles it.",
+            concept="typed routing"))
 
     if not out:
-        out.append(Hint("Coverage looks solid — hold the line and watch for new kinds.", "ok"))
+        out.append(Hint(
+            "Coverage looks solid — hold the line and watch for new kinds.", "ok",
+            why="No uncovered types, no backed-up nodes, no latency bleed right now.",
+            fix="Prep for the next wave (check the preview) and keep credits for gaps.",
+            concept="steady state"))
     return out[:5]

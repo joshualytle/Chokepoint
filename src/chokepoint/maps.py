@@ -121,20 +121,33 @@ class Graph:
         return True
 
     def remove_edge(self, src: str, dst: str) -> bool:
-        if src in self.adj and dst in self.adj[src]:
-            self.adj[src].remove(dst)
-            return True
-        return False
+        """Remove a directed edge. Rejected if it would strand traffic — the source
+        must still be able to reach the sink (there's always a path for alerts)."""
+        if src not in self.adj or dst not in self.adj[src]:
+            return False
+        self.adj[src].remove(dst)
+        if not self.reachable(self.source, self.sink):
+            self.adj[src].append(dst)   # revert — this was the only path through
+            return False
+        return True
 
     def remove_node(self, nid: str) -> bool:
-        """Remove a node and all its edges. The source/sink can't be removed."""
+        """Remove a node and all its edges. The source/sink can't be removed, and
+        neither can a node whose removal would cut the source→sink path."""
         if nid in (self.source, self.sink) or nid not in self.nodes:
             return False
-        del self.nodes[nid]
-        self.adj.pop(nid, None)
-        for outs in self.adj.values():
-            if nid in outs:
-                outs.remove(nid)
+        # tentatively remove, then require the pipeline to still connect
+        node = self.nodes.pop(nid)
+        outs = self.adj.pop(nid, [])
+        ins = [s for s, dsts in self.adj.items() if nid in dsts]
+        for s in ins:
+            self.adj[s].remove(nid)
+        if not self.reachable(self.source, self.sink):
+            self.nodes[nid] = node       # restore — it was the only path
+            self.adj[nid] = outs
+            for s in ins:
+                self.adj[s].append(nid)
+            return False
         return True
 
     def copy(self) -> Graph:

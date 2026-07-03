@@ -23,3 +23,6 @@ env/
 
 # game runtime
 chokepoint_highscore.txt
+
+# generated Pyodide bundle (built by serve_native.py)
+web/chokepoint.zip

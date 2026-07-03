@@ -39,6 +39,40 @@ python serve_web.py                   # serve on http://localhost:8000 (and your
 The desktop build is unchanged (`python -m chokepoint`); the web build is an
 additional target that reuses the same code behind an async render loop.
 
+### Web-native app (recommended) — `web/`
+
+There's also a **native-web** version with a crisp HTML/canvas UI and a real code
+editor (CodeMirror). The whole Python core + your `loadout.py` run in the browser
+via [Pyodide](https://pyodide.org/); player code is **sandboxed** (`safety.py`)
+so it can't import arbitrary modules or reach the network/DOM.
+
+```bash
+python serve_native.py               # http://localhost:8001 (packages the core for Pyodide)
+```
+
+#### Hosting the web-native app
+
+The `web/` app is **pure static files** with **no backend** — the Python runs in
+the visitor's browser via Pyodide (loaded from a CDN, along with CodeMirror), and
+player code is sandboxed. So it can be served by **any static host**, not just
+GitHub:
+
+- **GitHub Pages** — automated by `.github/workflows/pages.yml`: pushing to `main`
+  packages the core and deploys `web/`. One-time setup: **Settings → Pages → Build
+  and deployment → Source: *GitHub Actions***. Publishes to
+  `https://<user>.github.io/<repo>/`.
+- **Netlify / Vercel / Cloudflare Pages / S3 / nginx / your own box** — serve the
+  `web/` folder. Two caveats:
+  1. Include **`web/chokepoint.zip`** (the packaged Python core). It's
+     git-ignored, so build it first with
+     `python -c "import serve_native; serve_native.build_package()"` (or give the
+     host that as a build command), then deploy `web/`.
+  2. Serve over **http(s)**, not `file://`, and visitors need internet on first
+     load for the Pyodide/CodeMirror CDNs.
+
+For a fully self-contained/offline build (no CDN dependencies), vendor Pyodide and
+CodeMirror into `web/` and point the `<script>` tags at the local copies.
+
 ## Two ways to lose
 
 - **Loss (leaks):** a kind no turret accepts flows to the exit, or a node's

@@ -11,8 +11,19 @@ def test_coverage_gap_names_the_fixing_gun():
     w.set_turrets([Turret(200, 140, make_gun("sieve"))])  # covers auth/dns, not ids
     w.stats["ids"].spawned = 5                            # ids has appeared, uncovered
     hints = coaching(w)
-    assert any(h.level == "danger" and "ids" in h.text and "scatter" in h.text
-               for h in hints)
+    # the symptom is in text, the fixing gun in fix, and it teaches the concept
+    assert any(h.level == "danger" and "ids" in h.text and "scatter" in h.fix
+               and h.concept == "consumer coverage" and h.why for h in hints)
+
+
+def test_parse_gap_suggests_a_parser():
+    from chokepoint.packets import Packet
+    w = World(MAPS["switchback"])
+    # a raw alert whose payload no parser can decode -> a parse-coverage gap
+    w.packets.append(Packet("raw", 12, 12, 60, at="n1", payload="endpoint"))
+    hints = coaching(w)
+    assert any(h.concept == "parse coverage" and "endpoint" in h.text
+               and "parser" in h.fix for h in hints)
 
 
 def test_solid_coverage_gives_an_all_clear():

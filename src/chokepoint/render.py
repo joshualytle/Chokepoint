@@ -44,7 +44,9 @@ from .arsenal import GUN_LIBRARY, MODULE_LIBRARY, active_synergies, gun_cost, ma
 from .codebuffer import TextBuffer
 from .editor import ArsenalEditor
 from .gates import DEFAULT_GATE_COST
+from .glossary import GLOSSARY, HUD_HELP
 from .hints import coaching
+from .lessons import Lessons
 from .limiter import DEFAULT_LIMITER_COST
 from .maps import GW, MAP_LIST, MAPS
 from .metrics import summarize_failure
@@ -74,6 +76,7 @@ async def main() -> None:  # pragma: no cover - needs a display
     pygame.init()
     pygame.key.set_repeat(250, 30)
     WIN_W, WIN_H = 1100, 680
+    LESSON_X = int(WIN_W * 0.56)   # left edge of the lessons panel in the code editor
     screen = pygame.display.set_mode((WIN_W, WIN_H))
     pygame.display.set_caption("Chokepoint — typed turrets vs an alert flood")
     clock = pygame.time.Clock()
@@ -122,6 +125,10 @@ async def main() -> None:  # pragma: no cover - needs a display
     tutorial = Tutorial()        # guided onboarding; freezes the sim until done/skipped
     tut_next: Any = None         # Rect of the on-screen Next/Start button (set while drawing)
     tut_skip: Any = None         # Rect of the Skip button
+    lessons = Lessons()          # in-editor Python lessons (shown beside the C editor)
+    les_next: Any = None         # Rects for the lessons panel buttons (set while drawing)
+    les_skip: Any = None
+    les_start: Any = None
     speed = 1                    # sim speed multiplier (F cycles 1x/2x/3x)
     sandbox = False              # practice mode: free credits to experiment (K)
     prev_wave = 0                # to announce wave clears
@@ -131,6 +138,7 @@ async def main() -> None:  # pragma: no cover - needs a display
     # palette rows registered each frame so panel clicks can be mapped to actions:
     # (rect, "gun"|"mod", name)
     palette_hits: list[tuple[Any, str, str]] = []
+    help_hits: list[tuple[Any, list[str]]] = []  # (rect, tooltip lines) for HUD "what is this?"
     llm_state: dict[str, str] = {"status": "idle", "text": "Press L for local-LLM help."}
     # transient action feedback, shown in every mode (unlike the LLM box)
     toast: dict[str, Any] = {"text": "", "ttl": 0.0, "ok": True}
@@ -199,10 +207,28 @@ async def main() -> None:  # pragma: no cover - needs a display
         nx, ny = world.map.pos(nid)
         return nid if (nx - mx) ** 2 + (ny - my) ** 2 <= NODE_PICK * NODE_PICK else None
 
+    def edge_under(mx: int, my: int, tol: float = 8.0) -> tuple[str, str] | None:
+        """The edge (src, dst) whose line passes nearest the click, within tol px."""
+        best: tuple[str, str] | None = None
+        best_d = tol
+        for src, dst in world.map.edges():
+            ax, ay = world.map.pos(src)
+            bx, by = world.map.pos(dst)
+            dx, dy = bx - ax, by - ay
+            seg2 = dx * dx + dy * dy
+            t = 0.0 if seg2 == 0 else max(0.0, min(1.0, ((mx - ax) * dx + (my - ay) * dy) / seg2))
+            d = math.hypot(mx - (ax + t * dx), my - (ay + t * dy))
+            if d < best_d:
+                best_d, best = d, (src, dst)
+        return best
+
     def topology_edited() -> None:
-        """After a structural change: drop in-flight packets (they may reference a
-        removed node) and re-snap devices."""
-        world.packets.clear()
+        """After a structural change, re-snap devices and drop ONLY packets that now
+        reference a removed node — so adding a branch mid-wave no longer wipes the
+        alerts already in flight."""
+        valid = world.map.nodes
+        world.packets = [p for p in world.packets
+                         if p.at in valid and (p.moving_to is None or p.moving_to in valid)]
         world.rebind()
 
     def apply_code(src: str) -> None:
@@ -211,7 +237,9 @@ async def main() -> None:  # pragma: no cover - needs a display
         We compile and dry-run build_loadout first, so a syntax/author error is
         reported in the editor and the on-disk loadout.py is never corrupted.
         """
-        ns: dict = {}
+        # seed __name__/__package__ so the file's relative imports (from .arsenal)
+        # resolve when we exec it outside the normal import machinery.
+        ns: dict = {"__name__": "chokepoint.loadout", "__package__": "chokepoint"}
         try:
             exec(compile(src, loadout_mod.__file__, "exec"), ns)  # noqa: S102 - intended in-app eval
             if "build_loadout" not in ns:
@@ -227,6 +255,39 @@ async def main() -> None:  # pragma: no cover - needs a display
         deploy_loadout(refund_current=True)
         code_status["msg"] = "applied OK"
         say("loadout applied from editor")
+
+    def run_lesson_code(src: str) -> None:
+        """Run a lesson's build_loadout in-memory and deploy it — never writes the
+        file. Used by hands-on lessons so your real loadout.py stays untouched."""
+        nonlocal editor
+        ns: dict = {"__name__": "chokepoint.loadout", "__package__": "chokepoint"}
+        try:
+            exec(compile(src, "<lesson>", "exec"), ns)  # noqa: S102 - intended in-app eval
+            turrets = (ns["build_loadout"](world.unlocked(), world.map.slots)
+                       if "build_loadout" in ns else [])
+        except Exception as err:
+            code_status["msg"] = f"error: {err}"
+            say("code not applied — see editor", ok=False)
+            return
+        for t in world.turrets:            # refund and reseed from the lesson build
+            world.bank.earn(gun_cost(t.gun))
+        editor = ArsenalEditor(world.unlocked(), bank=world.bank)
+        editor.seed_purchase(turrets)
+        sync_world()
+        code_status["msg"] = "ran (lesson — not saved to loadout.py)"
+
+    def enter_lesson() -> None:
+        """On moving into a lesson: load any starter code and grant sandbox credits."""
+        nonlocal code_scroll, sandbox
+        le = lessons.lesson
+        if le is None:
+            return
+        if le.starter is not None:
+            code_buf.set_text(le.starter)
+            code_scroll = 0
+        if le.sandbox:
+            sandbox = True
+            world.bank.balance = max(world.bank.balance, 100000)  # free credits to focus on code
 
     def switch_map(delta: int) -> None:
         nonlocal map_i, world, edit_mode, awaiting_start
@@ -307,7 +368,11 @@ async def main() -> None:  # pragma: no cover - needs a display
                 if ev.key == pygame.K_ESCAPE:
                     code_mode = False
                 elif (ev.mod & pygame.KMOD_CTRL) and ev.key == pygame.K_s:
-                    apply_code(code_buf.text())
+                    le = lessons.lesson if lessons.active else None
+                    if le is not None and le.starter is not None:
+                        run_lesson_code(code_buf.text())   # hands-on lesson: don't touch the file
+                    else:
+                        apply_code(code_buf.text())
                 elif (ev.mod & pygame.KMOD_CTRL) and ev.key == pygame.K_z:
                     code_buf.undo()
                 elif ev.key == pygame.K_RETURN:
@@ -368,11 +433,15 @@ async def main() -> None:  # pragma: no cover - needs a display
                 elif ev.key == pygame.K_h:
                     help_mode = not help_mode
                 elif ev.key == pygame.K_c:
-                    try:
-                        with open(loadout_mod.__file__, encoding="utf-8") as fh:
-                            code_buf.set_text(fh.read())
-                    except OSError as err:
-                        code_buf.set_text(f"# could not read loadout.py: {err}\n")
+                    le = lessons.lesson if lessons.active else None
+                    if le is not None and le.starter is not None:
+                        code_buf.set_text(le.starter)   # a hands-on lesson: show its starter
+                    else:
+                        try:
+                            with open(loadout_mod.__file__, encoding="utf-8") as fh:
+                                code_buf.set_text(fh.read())
+                        except OSError as err:
+                            code_buf.set_text(f"# could not read loadout.py: {err}\n")
                     code_status["msg"] = ""
                     code_scroll = 0
                     code_mode = True
@@ -427,8 +496,20 @@ async def main() -> None:  # pragma: no cover - needs a display
                         editor.select_gun(guns[idx])
             elif ev.type == pygame.MOUSEWHEEL and code_mode:
                 code_scroll = max(0, code_scroll - ev.y * 3)  # scroll the code view
-            elif ev.type == pygame.MOUSEBUTTONDOWN and code_mode and ev.button == 1:
-                mx, my = ev.pos  # click to position the caret in the editor
+            elif (ev.type == pygame.MOUSEBUTTONDOWN and code_mode and ev.button == 1
+                  and les_next is not None and les_next.collidepoint(ev.pos)):
+                lessons.next()
+                enter_lesson()   # load the next lesson's starter / sandbox, if any
+            elif (ev.type == pygame.MOUSEBUTTONDOWN and code_mode and ev.button == 1
+                  and les_skip is not None and les_skip.collidepoint(ev.pos)):
+                lessons.skip()
+            elif (ev.type == pygame.MOUSEBUTTONDOWN and code_mode and ev.button == 1
+                  and les_start is not None and les_start.collidepoint(ev.pos)):
+                lessons.start()
+                enter_lesson()
+            elif (ev.type == pygame.MOUSEBUTTONDOWN and code_mode and ev.button == 1
+                  and ev.pos[0] < LESSON_X - 14):  # caret positioning in the code area only
+                mx, my = ev.pos
                 top, left = 56, 52
                 r = code_scroll + (my - top) // 16
                 if my >= top and 0 <= r < len(code_buf.lines):
@@ -504,13 +585,26 @@ async def main() -> None:  # pragma: no cover - needs a display
                         else:
                             say("edge rejected (would loop, or duplicate)", ok=False)
                         edge_src = None
-                elif ev.button == 3:                  # remove a node
-                    if picked is not None and world.map.remove_node(picked):
-                        topology_edited()
-                        say(f"removed {picked}")
+                elif ev.button == 3:                  # cancel a pending edge, or remove
+                    if edge_src is not None:
+                        edge_src = None
+                        say("edge cancelled")
+                    elif picked is not None:
+                        if world.map.remove_node(picked):
+                            topology_edited()
+                            say(f"removed node {picked}")
+                        else:
+                            say("can't remove that node (source/sink or the only path)",
+                                ok=False)
                     else:
-                        say("can't remove (source/sink or empty space)", ok=False)
-                    edge_src = None
+                        e = edge_under(mx, my)
+                        if e is None:
+                            say("right-click a node or an edge to remove it", ok=False)
+                        elif world.map.remove_edge(*e):
+                            topology_edited()
+                            say(f"removed edge {e[0]}→{e[1]}")
+                        else:
+                            say("can't remove that edge — it's the only path", ok=False)
 
         # keep the editor palette in step with what the current wave has unlocked
         editor.set_unlocked(world.unlocked())
@@ -675,9 +769,16 @@ async def main() -> None:  # pragma: no cover - needs a display
             text("src", sx - 9, sy + 18, F_S, GATE_C)
             text("sink", kx - 12, ky + 18, F_S, GATE_C)
             if edge_src is not None:
-                pygame.draw.line(screen, PHOS, world.map.pos(edge_src), mouse, 2)
-            text("BUILD MODE (T) — click empty = node · node→node = edge · RMB node = remove",
-                 12, 14, F_S, PHOS)
+                ex, ey = (int(v) for v in world.map.pos(edge_src))
+                pygame.draw.circle(screen, PHOS, (ex, ey), 18, 2)  # highlight the picked node
+                pygame.draw.line(screen, PHOS, (ex, ey), mouse, 2)
+            text("BUILD MODE (T) — branch off the line:", 12, 12, F_S, PHOS)
+            if edge_src is None:
+                text("click empty = new node · click node then node = connect · "
+                     "RMB node/edge = remove", 12, 30, F_S, MUTED)
+            else:
+                text(f"picked {edge_src} — click the node to connect it to  (RMB cancels).",
+                     12, 30, F_S, AMBER)
 
         if ((world.intermission > 0 or awaiting_start) and not world.over
                 and not build_mode and not tutorial.active):
@@ -699,20 +800,46 @@ async def main() -> None:  # pragma: no cover - needs a display
         sand_txt = "   · SANDBOX" if sandbox else ""
         text(f"mode: {world.difficulty}   D to cycle{speed_txt}{sand_txt}   ·   H for help",
              12, WIN_H - 40, F_S, PHOS if sandbox else MUTED)
-        # live coach: the single most important thing to fix right now
-        if coach and not build_mode and not code_mode and not world.over:
-            text("COACH: " + coach[0].text, 12, WIN_H - 78, F_S, coach_c[coach[0].level])
+        # live coach: the single most important thing to fix — a teaching card
+        # (symptom + why + fix + concept) when something's wrong, one line when clear
+        if coach and not build_mode and not code_mode and not world.over and not tutorial.active:
+            h = coach[0]
+            if h.level == "ok":
+                text("COACH: " + h.text, 12, WIN_H - 78, F_S, coach_c["ok"])
+            else:
+                pw = int(GW * 0.62)
+                clines: list[tuple[str, Any]] = [(f"COACH  >  {h.text}", coach_c[h.level])]
+                for j, ln in enumerate(wrap(h.why, pw - 28, F_S)):
+                    clines.append((("WHY:  " if j == 0 else "      ") + ln, INK))
+                for j, ln in enumerate(wrap(h.fix, pw - 28, F_S)):
+                    clines.append((("FIX:  " if j == 0 else "      ") + ln, AMBER))
+                if h.concept:
+                    clines.append((f"concept: {h.concept}", MUTED))
+                ph = len(clines) * 16 + 14
+                py = WIN_H - 96 - ph
+                pygame.draw.rect(screen, PANEL2, (10, py, pw, ph), border_radius=6)
+                pygame.draw.rect(screen, coach_c[h.level], (10, py, pw, ph), 1, border_radius=6)
+                for j, (ln, c) in enumerate(clines):
+                    text(ln, 20, py + 8 + j * 16, F_S, c)
         # transient action feedback (save/reload/over-budget/difficulty), always visible
         if toast["ttl"] > 0:
             toast["ttl"] -= dt
             text(toast["text"], 12, WIN_H - 60, F_S, PHOS if toast["ok"] else DANGER)
 
-        # ---- panel ----
+        # ---- panel ----  (hover any stat/kind for a plain-language explanation)
+        # solid panel background + divider: a clear boundary so playfield text and
+        # top-strip overlays can't bleed across into the stats.
+        pygame.draw.rect(screen, (10, 17, 28), (GW, 0, WIN_W - GW, WIN_H))
+        pygame.draw.line(screen, GRID, (GW, 0), (GW, WIN_H), 1)
+        help_hits.clear()
+        pw_stat = WIN_W - PANEL_X - 14
         text("CHOKEPOINT", PANEL_X, 16, F_M, PHOS)
         text(f"wave {world.level}", PANEL_X, 40, F_S, INK)
         leak_c = DANGER if world.leaks >= MAX_LEAK - 3 else INK
         text(f"leaks {world.leaks}/{MAX_LEAK}", PANEL_X + 110, 40, F_S, leak_c)
+        help_hits.append((pygame.Rect(PANEL_X + 110, 40, 120, 16), HUD_HELP["leaks"]))
         text(f"cr {world.bank.balance}", PANEL_X + 240, 40, F_S, PHOS)
+        help_hits.append((pygame.Rect(PANEL_X + 240, 40, 90, 16), HUD_HELP["credits"]))
 
         # health: the latency budget, bled by packets that sit queued too long
         hp_frac = max(0.0, world.health / START_HEALTH)
@@ -720,15 +847,18 @@ async def main() -> None:  # pragma: no cover - needs a display
         text(f"health {world.health:.0f}", PANEL_X, 60, F_S, hp_c)
         pygame.draw.rect(screen, GRID, (PANEL_X + 90, 62, 120, 8))
         pygame.draw.rect(screen, hp_c, (PANEL_X + 90, 62, int(120 * hp_frac), 8))
+        help_hits.append((pygame.Rect(PANEL_X, 58, 210, 16), HUD_HELP["health"]))
 
         gaps = sorted(world.coverage_gaps())
         if gaps:
             text("COVERAGE GAP: " + ", ".join(gaps), PANEL_X, 78, F_S, DANGER)
         else:
             text("coverage: all seen kinds handled", PANEL_X, 78, F_S, PHOS)
+        help_hits.append((pygame.Rect(PANEL_X, 78, pw_stat, 16), HUD_HELP["coverage"]))
 
         # per-kind table
         text("KIND        in  ok  leak  now", PANEL_X, 100, F_S, MUTED)
+        help_hits.append((pygame.Rect(PANEL_X, 100, pw_stat, 16), HUD_HELP["kinds"]))
         row = 118
         gap_kinds = world.coverage_gaps()
         for k, s in world.stats.items():
@@ -739,6 +869,10 @@ async def main() -> None:  # pragma: no cover - needs a display
             mark = "!" if gap else " "  # uncovered kinds flagged before they pile up
             line = f"{mark}{k:<9} {s.spawned:>3} {s.handled:>3} {s.leaked:>4} {s.inflight:>4}"
             text(line, PANEL_X + 14, row, F_S, DANGER if (gap or s.leaked) else INK)
+            help_hits.append((pygame.Rect(PANEL_X, row, pw_stat, 16),
+                              [f"{k} — {KINDS[k]['desc']}",
+                               "columns: in / ok / leak / now",
+                               "= arrived / handled / leaked / in the queue now"]))
             row += 18
 
         row += 8
@@ -754,10 +888,10 @@ async def main() -> None:  # pragma: no cover - needs a display
         if edit_mode:
             text("EDIT MODE — E to exit", PANEL_X, row, F_S, PHOS)
             row += 18
-            text("drag/click place · LMB turret=equip · RMB remove · X clear all",
+            text("click to place · LMB=equip · RMB=remove · X=clear",
                  PANEL_X, row, F_S, MUTED)
             row += 20
-            text("GUNS — click one, then click a node to place it", PANEL_X, row, F_S, AMBER)
+            text("GUNS — click one, then click a node:", PANEL_X, row, F_S, AMBER)
             row += 20
             for i, name in enumerate(editor.available_guns()):
                 g = make_gun(name)
@@ -907,13 +1041,32 @@ async def main() -> None:  # pragma: no cover - needs a display
                     if unhandled:
                         node_lines.append("not served here: " + ", ".join(unhandled))
             tooltip(node_lines, DANGER if aging else INK)
+        else:
+            # "what is this?" — hover any HUD stat/kind row for a plain explanation
+            for hrect, hlines in help_hits:
+                if hrect.collidepoint(mouse):
+                    tooltip(hlines)
+                    break
 
-        # ---- help overlay (toggle H): controls + kind/gun legend ----
+        # ---- help overlay (toggle H): controls + kind/gun legend + glossary ----
         if help_mode and not world.over:
             ov = pygame.Surface((GW, WIN_H), pygame.SRCALPHA)
             ov.fill((8, 14, 22, 235))
             screen.blit(ov, (0, 0))
             text("HELP — H to close", 24, 20, F_M, PHOS)
+            # glossary column on the right (concepts in plain language)
+            gx = 400
+            text("GLOSSARY", gx, 52, F_S, MUTED)
+            gy = 70
+            for term, defn in GLOSSARY:
+                text(term, gx, gy, F_S, PHOS)
+                gy += 16
+                for ln in wrap(defn, GW - gx - 20, F_S):
+                    text(ln, gx + 10, gy, F_S, INK)
+                    gy += 16
+                gy += 8
+            text("Tip: in play, hover any stat or kind for a quick explanation.",
+                 gx, gy + 2, F_S, AMBER)
             controls = [
                 ("[ ]", "previous / next map"), ("E", "placement editor"),
                 ("G", "gate router (in editor)"), ("B", "quelimiter (in editor)"),
@@ -1000,13 +1153,19 @@ async def main() -> None:  # pragma: no cover - needs a display
             text(f"cost / handled: {eff['cost_per_handled']:.0f}cr", 24, yy + 52, F_S, INK)
             # coach: everything worth fixing, not just the top line
             text("COACH", 360, 56, F_S, MUTED)
-            for i, h in enumerate(coach):
+            yy2 = 76
+            for h in coach:
                 for j, ln in enumerate(wrap(h.text, GW - 380, F_S)):
-                    text(("- " if j == 0 else "  ") + ln, 360, 76 + i * 34 + j * 16,
-                         F_S, coach_c[h.level])
+                    text(("- " if j == 0 else "  ") + ln, 360, yy2, F_S, coach_c[h.level])
+                    yy2 += 16
+                for ln in wrap(h.fix, GW - 396, F_S) if h.fix else []:
+                    text("    -> " + ln, 360, yy2, F_S, AMBER)
+                    yy2 += 16
+                yy2 += 6
 
         # in-app code editor (toggle C): edit loadout.py, Ctrl+S to apply
         if code_mode:
+            les_next = les_skip = les_start = None
             ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
             ov.fill((6, 10, 16, 246))
             screen.blit(ov, (0, 0))
@@ -1036,10 +1195,53 @@ async def main() -> None:  # pragma: no cover - needs a display
                     cx = 52 + F_S.size(code_buf.lines[i][: code_buf.col])[0]
                     pygame.draw.line(screen, PHOS, (cx, y), (cx, y + 14), 1)
 
+            # ---- Python lessons panel (right side of the editor) ----
+            lx, lw = LESSON_X, WIN_W - LESSON_X - 16
+            pygame.draw.line(screen, GRID, (lx - 14, 40), (lx - 14, WIN_H - 16), 1)
+            if lessons.active and lessons.lesson is not None:
+                lessons.check(world, editor)   # live-update the ✓ as the board changes
+                le = lessons.lesson
+                text(f"PYTHON LESSONS   {lessons.i + 1}/{len(lessons.script)}",
+                     lx, 12, F_S, MUTED)
+                text(le.title, lx, 38, F_M, PHOS)
+                yy = 66
+                for para in le.teach:
+                    for ln in wrap(para, lw, F_S):
+                        text(ln, lx, yy, F_S, INK)
+                        yy += 16
+                    yy += 5
+                text("TASK", lx, yy, F_S, AMBER)
+                yy += 18
+                for ln in wrap(le.task, lw, F_S):
+                    text(ln, lx, yy, F_S, INK)
+                    yy += 16
+                if le.concept:
+                    yy += 6
+                    text(f"concept: {le.concept}", lx, yy, F_S, MUTED)
+                    yy += 22
+                if le.check is not None:
+                    text("done!" if lessons.passed else "try it, then Ctrl+S to run & check",
+                         lx, yy, F_S, PHOS if lessons.passed else MUTED)
+                les_skip = pygame.Rect(lx, WIN_H - 42, 108, 24)
+                pygame.draw.rect(screen, MUTED, les_skip, 1, border_radius=4)
+                text("Skip lessons", les_skip.x + 8, les_skip.y + 4, F_S, MUTED)
+                if lessons.can_advance():
+                    label = "Finish" if lessons.i == len(lessons.script) - 1 else "Next"
+                    les_next = pygame.Rect(lx + lw - 96, WIN_H - 42, 96, 24)
+                    pygame.draw.rect(screen, PHOS, les_next, border_radius=4)
+                    text(f"{label}  >", les_next.x + 14, les_next.y + 4, F_S, PANEL2)
+            else:
+                text("PYTHON LESSONS", lx, 12, F_S, MUTED)
+                text("A guided tour of the Python in loadout.py.", lx, 40, F_S, INK)
+                les_start = pygame.Rect(lx, 74, 132, 26)
+                pygame.draw.rect(screen, PHOS, les_start, border_radius=4)
+                text("Start lessons", les_start.x + 12, les_start.y + 5, F_S, PANEL2)
+
         if not world.over:
             end_score["saved"] = False  # arm scoring for the next game-over
 
-        if world.paused and not world.over and not code_mode:
+        if (world.paused and not world.over and not code_mode and not build_mode
+                and not awaiting_start):   # build header / wave-preview own the top strip
             text("|| PAUSED — P resume · . step one tick", GW // 2 - 130, 36, F_M, AMBER)
 
         if world.over and not code_mode:

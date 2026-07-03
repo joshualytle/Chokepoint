@@ -54,7 +54,8 @@ SCRIPT: list[Step] = [
         "Place one, then click Next.",
     ]),
     Step("Read the dashboard", [
-        "The right panel lists each type:  in / handled / leaked / now.",
+        "The right panel's table lists each type:  in / ok / leak / now",
+        "(arrived / handled / leaked / in the queue right now).",
         "A  !  marks an UNCOVERED type — no worker handles it, so it will leak.",
     ]),
     Step("Two ways to lose", [

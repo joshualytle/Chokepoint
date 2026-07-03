@@ -96,7 +96,10 @@ def palette_json() -> str:
 
 def select_gun(name: str) -> str:
     assert _editor is not None
-    _editor.select_gun(name)
+    if name == _editor.selected_gun:      # tapping the selected gun again deselects it
+        _editor.selected_gun = None
+    else:
+        _editor.select_gun(name)
     return json.dumps({"selected": _editor.selected_gun})
 
 

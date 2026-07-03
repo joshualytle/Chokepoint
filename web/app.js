@@ -184,7 +184,7 @@ function refreshPalette() {
   const items = JSON.parse(G.palette_json());
   selectedGun = (items.find((g) => g.selected) || {}).name || null;
   el("palette").innerHTML =
-    `<div class="palette-head">GUNS — click one, then click a node on the board (right-click a turret to remove)</div>` +
+    `<div class="palette-head">GUNS — tap one (tap again to deselect), then tap a node to place. Remove: right-click, or tap a turret with no gun selected.</div>` +
     items.map((g) => `
       <button class="gun ${g.selected ? "sel" : ""} ${g.afford ? "" : "poor"}" data-gun="${g.name}">
         <span class="gun-name">${g.name}</span><span class="gun-cost">${g.cost}cr</span>
@@ -239,19 +239,26 @@ function wireUI() {
     el("buildBtn").classList.toggle("primary", buildMode);
   };
 
+  // Pointer events unify mouse + touch; touch-action:none (CSS) stops the tap
+  // from scrolling/zooming so it registers on the board (fixes mobile placement).
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
-  canvas.addEventListener("mousemove", (e) => { mouseW = eventToWorld(e); updateBoardTip(e); });
-  canvas.addEventListener("mouseleave", () => el("boardTip").classList.add("hidden"));
-  canvas.addEventListener("mousedown", (e) => {
-    const [x, y] = eventToWorld(e);
+  canvas.addEventListener("pointermove", (e) => { mouseW = eventToWorld(e); updateBoardTip(e); });
+  canvas.addEventListener("pointerleave", () => el("boardTip").classList.add("hidden"));
+  canvas.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    mouseW = eventToWorld(e);
+    const [x, y] = mouseW;
     if (buildMode) return onBuildClick(e.button, x, y);
-    if (e.button === 2) { G.remove_at(x, y); refreshPalette(); }        // right-click: remove
-    else {                                                             // left-click: place
-      const r = JSON.parse(G.place_at(x, y));
-      if (r.ok) { G.tutorial_signal("place"); lastTut = ""; showPlace("placed ✓", true); }
-      else showPlace(r.reason || "pick a gun in the palette first", false);
-      refreshPalette();
+    if (e.button === 2) { G.remove_at(x, y); refreshPalette(); return; }  // right-click: remove
+    if (!selectedGun) {                                                   // tap empty-handed on a turret = remove
+      if (snap && snap.turrets.some((t) => (t.x - x) ** 2 + (t.y - y) ** 2 <= 16 * 16)) {
+        G.remove_at(x, y); refreshPalette(); showPlace("removed", true); return;
+      }
     }
+    const r = JSON.parse(G.place_at(x, y));                               // place
+    if (r.ok) { G.tutorial_signal("place"); lastTut = ""; showPlace("placed ✓", true); }
+    else showPlace(r.reason || "pick a gun in the palette first", false);
+    refreshPalette();
   });
 }
 

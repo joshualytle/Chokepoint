@@ -18,6 +18,8 @@ let running = false, over = false;
 let selectedGun = null;                    // gun chosen in the palette (click to place)
 let buildMode = false, edgeSrc = null;     // topology editing state
 let mouseW = [0, 0];                       // last mouse position in world coords
+let helpData = null;                       // {glossary, hud}
+let lastTut = "", lastLes = "";            // panel-state caches (avoid re-rendering every frame)
 let last = performance.now();
 
 const DEFAULT_LOADOUT = `# Edit build_loadout, then Run (Ctrl+Enter).
@@ -57,6 +59,16 @@ async function boot() {
     add_edge: pyodide.globals.get("add_edge"),
     remove_node: pyodide.globals.get("remove_node"),
     remove_edge: pyodide.globals.get("remove_edge"),
+    help_json: pyodide.globals.get("help_json"),
+    tutorial_state: pyodide.globals.get("tutorial_state"),
+    tutorial_next: pyodide.globals.get("tutorial_next"),
+    tutorial_skip: pyodide.globals.get("tutorial_skip"),
+    tutorial_signal: pyodide.globals.get("tutorial_signal"),
+    lessons_state: pyodide.globals.get("lessons_state"),
+    lessons_next: pyodide.globals.get("lessons_next"),
+    lessons_skip: pyodide.globals.get("lessons_skip"),
+    lessons_start: pyodide.globals.get("lessons_start"),
+    grant_sandbox_credits: pyodide.globals.get("grant_sandbox_credits"),
   };
 
   const meta = JSON.parse(G.new_game("trunk", "easy"));
@@ -70,6 +82,8 @@ async function boot() {
   });
   applyLoadout();
   refreshPalette();
+  helpData = JSON.parse(G.help_json());
+  buildGlossary();
 
   wireUI();
   el("boot").classList.add("hidden");
@@ -103,6 +117,7 @@ function applyLoadout() {
     s.className = "code-status ok";
   } else { s.textContent = res.error; s.className = "code-status err"; }
   refreshPalette();
+  G.tutorial_signal("run"); lastTut = ""; lastLes = "";
 }
 
 function refreshPalette() {
@@ -131,9 +146,11 @@ function wireUI() {
   el("startBtn").onclick = () => {
     if (over) return;
     running = !running;
-    if (running) { G.begin(); el("startBtn").textContent = "❚❚ Pause"; }
+    if (running) { G.begin(); el("startBtn").textContent = "❚❚ Pause"; G.tutorial_signal("start"); lastTut = ""; }
     else { G.set_paused(true); el("startBtn").textContent = "▶ Start"; }
   };
+  el("helpBtn").onclick = () => el("glossary").classList.toggle("hidden");
+  el("glossClose").onclick = () => el("glossary").classList.add("hidden");
   el("resetBtn").onclick = newGame;
   el("mapSel").onchange = newGame;
   el("diffSel").onchange = newGame;
@@ -149,7 +166,10 @@ function wireUI() {
     const [x, y] = eventToWorld(e);
     if (buildMode) return onBuildClick(e.button, x, y);
     if (e.button === 2) { G.remove_at(x, y); refreshPalette(); }        // right-click: remove
-    else if (selectedGun) { G.place_at(x, y); refreshPalette(); }       // left-click: place
+    else if (selectedGun) {                                            // left-click: place
+      if (JSON.parse(G.place_at(x, y)).ok) { G.tutorial_signal("place"); lastTut = ""; }
+      refreshPalette();
+    }
   });
 }
 
@@ -177,7 +197,63 @@ function frame(now) {
   render(s);
   if (buildMode) drawBuildOverlay(s);
   updateHUD(s);
+  tickPanels();
   requestAnimationFrame(frame);
+}
+
+// ------------------------------------------------- tutorial + lessons panels
+function tickPanels() {
+  const tj = G.tutorial_state();
+  if (tj !== lastTut) { lastTut = tj; renderTutorial(JSON.parse(tj)); }
+  const lj = G.lessons_state();
+  if (lj !== lastLes) { lastLes = lj; renderLessons(JSON.parse(lj)); }
+}
+
+function renderTutorial(s) {
+  const box = el("tutorial");
+  if (!s.active) { box.classList.add("hidden"); return; }
+  box.classList.remove("hidden");
+  box.innerHTML = `
+    <div class="tut-head"><b>${s.title}</b><span>Step ${s.i + 1}/${s.n}</span></div>
+    ${s.body.map((b) => `<div>${b}</div>`).join("")}
+    <div class="tut-btns">
+      <button id="tutSkip">Skip</button>
+      ${s.manual ? `<button id="tutNext" class="primary">${s.button} ▸</button>`
+                 : `<span class="tut-hint">(do the action above to continue)</span>`}
+    </div>`;
+  el("tutSkip").onclick = () => { G.tutorial_skip(); lastTut = ""; };
+  if (s.manual) el("tutNext").onclick = () => { G.tutorial_next(); lastTut = ""; };
+}
+
+function renderLessons(s) {
+  const box = el("lessons");
+  if (!s.active) {
+    box.innerHTML = `<button id="lesStart">📘 Python lessons</button>`;
+    el("lesStart").onclick = () => { const st = JSON.parse(G.lessons_start()); enterLesson(st); lastLes = ""; };
+    return;
+  }
+  box.innerHTML = `
+    <div class="les-head"><b>${s.title}</b><span>lesson ${s.i + 1}/${s.n}</span></div>
+    ${s.teach.map((t) => `<div class="les-teach">${t}</div>`).join("")}
+    <div class="les-task"><b>TASK</b> ${s.task}</div>
+    ${s.concept ? `<div class="les-concept">concept: ${s.concept}</div>` : ""}
+    ${s.hands_on ? `<div class="les-status ${s.passed ? "ok" : ""}">${s.passed ? "done ✓" : "edit the code, then Run to check"}</div>` : ""}
+    <div class="les-btns">
+      <button id="lesSkip">Skip lessons</button>
+      ${s.can_advance ? `<button id="lesNext" class="primary">${s.i + 1 === s.n ? "Finish" : "Next"} ▸</button>` : ""}
+    </div>`;
+  el("lesSkip").onclick = () => { G.lessons_skip(); lastLes = ""; };
+  if (s.can_advance) el("lesNext").onclick = () => { const st = JSON.parse(G.lessons_next()); enterLesson(st); lastLes = ""; };
+}
+
+function enterLesson(s) {
+  if (s.active && s.hands_on && s.starter && cm) cm.setValue(s.starter);
+  if (s.active && s.sandbox) G.grant_sandbox_credits();
+}
+
+function buildGlossary() {
+  el("glossBody").innerHTML = helpData.glossary.map(
+    ([term, def]) => `<div class="gl-item"><b>${term}</b><span>${def}</span></div>`).join("");
 }
 
 function drawBuildOverlay(s) {

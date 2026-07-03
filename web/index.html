@@ -18,11 +18,15 @@
 
   <main>
     <section class="board-col">
-      <canvas id="board" width="820" height="620"></canvas>
+      <div class="board-stack">
+        <canvas id="board" width="820" height="620"></canvas>
+        <div id="tutorial" class="tutorial hidden"></div>
+      </div>
       <div class="controls">
         <button id="startBtn" class="primary">▶ Start</button>
         <button id="resetBtn">Reset</button>
         <button id="buildBtn">🔧 Build</button>
+        <button id="helpBtn">❔ Help</button>
         <label>map
           <select id="mapSel"></select>
         </label>
@@ -35,6 +39,7 @@
     </section>
 
     <section class="side-col">
+      <div id="lessons" class="lessons"></div>
       <div id="hud" class="hud"></div>
 
       <div class="editor-wrap">
@@ -47,6 +52,13 @@
       </div>
     </section>
   </main>
+
+  <div id="glossary" class="modal hidden">
+    <div class="modal-box">
+      <div class="modal-head"><span>Glossary</span><button id="glossClose">✕</button></div>
+      <div id="glossBody"></div>
+    </div>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.min.js"></script>

@@ -20,12 +20,15 @@ import json
 
 from chokepoint.arsenal import MODULE_LIBRARY, Module, Turret, make_gun
 from chokepoint.editor import ArsenalEditor
+from chokepoint.glossary import GLOSSARY, HUD_HELP
 from chokepoint.hints import coaching
+from chokepoint.lessons import Lessons
 from chokepoint.maps import MAP_LIST, MAPS
 from chokepoint.packets import DIFFICULTY_LIST, KINDS
 from chokepoint.parsers import Parser
 from chokepoint.safety import SafetyError, safe_exec
 from chokepoint.simulation import MAX_LEAK, START_HEALTH, World
+from chokepoint.tutorial import Step, Tutorial
 
 # the game objects a loadout may use, injected so no imports are even required
 _LOADOUT_API = {
@@ -240,3 +243,104 @@ def snapshot() -> dict:
 
 def snapshot_json() -> str:
     return json.dumps(snapshot())
+
+
+# ---- glossary / contextual help (pure data from the core) ----
+def help_json() -> str:
+    return json.dumps({"glossary": [list(g) for g in GLOSSARY], "hud": HUD_HELP})
+
+
+# ---- guided tutorial (reuses the pure Tutorial class, web-tailored steps) ----
+_WEB_TUTORIAL = [
+    Step("Welcome to Chokepoint", [
+        "Security alerts flood in from the left and flow to the exit on the right.",
+        "Handle each before it exits — or it LEAKS. Too many leaks ends the run."]),
+    Step("Alerts have types", [
+        "Every alert has a TYPE (its color). Turrets are workers that each handle",
+        "certain types. Your job is COVERAGE — a worker for every type that shows up."]),
+    Step("Place a worker", [
+        "Under the board, click a GUN in the palette, then click a node on the line",
+        "to place it. Right-click a turret to remove it."], event="place"),
+    Step("Read the dashboard", [
+        "The right panel lists each type:  in / ok / leak / now",
+        "(arrived / handled / leaked / in the queue now). A ! marks an uncovered type."]),
+    Step("Or build it in code", [
+        "On the right, edit build_loadout and click Run (Ctrl+Enter). Code and clicks",
+        "share one budget — write Python or point-and-click, your choice."], event="run"),
+    Step("Send the wave", [
+        "Press ▶ Start. Watch the board; the COACH card names the next thing to fix."],
+        event="start"),
+    Step("You're ready", [
+        "Use 🔧 Build to branch the topology — overload spills to a parallel worker.",
+        "Hover any stat for help, or open ❔ Help for the glossary. Good luck!"],
+        button="Start"),
+]
+_tutorial = Tutorial(_WEB_TUTORIAL)
+
+
+def _tut_state() -> dict:
+    st = _tutorial.step
+    if not _tutorial.active or st is None:
+        return {"active": False}
+    return {"active": True, "i": _tutorial.i, "n": len(_tutorial.script),
+            "title": st.title, "body": st.body, "manual": st.is_manual, "button": st.button}
+
+
+def tutorial_state() -> str:
+    return json.dumps(_tut_state())
+
+
+def tutorial_next() -> str:
+    _tutorial.next()
+    return json.dumps(_tut_state())
+
+
+def tutorial_skip() -> str:
+    _tutorial.skip()
+    return json.dumps({"active": False})
+
+
+def tutorial_signal(event: str) -> str:
+    _tutorial.signal(event)
+    return json.dumps(_tut_state())
+
+
+# ---- in-editor Python lessons (reuses the pure Lessons class) ----
+_lessons = Lessons()
+
+
+def _les_state() -> dict:
+    le = _lessons.lesson
+    if not _lessons.active or le is None:
+        return {"active": False}
+    if _world is not None:
+        _lessons.check(_world, _editor)   # live-update the check against the world
+    return {"active": True, "i": _lessons.i, "n": len(_lessons.script),
+            "title": le.title, "teach": le.teach, "task": le.task, "concept": le.concept,
+            "hands_on": le.starter is not None, "starter": le.starter or "",
+            "sandbox": le.sandbox, "passed": _lessons.passed, "can_advance": _lessons.can_advance()}
+
+
+def lessons_state() -> str:
+    return json.dumps(_les_state())
+
+
+def lessons_next() -> str:
+    _lessons.next()
+    return json.dumps(_les_state())
+
+
+def lessons_skip() -> str:
+    _lessons.skip()
+    return json.dumps({"active": False})
+
+
+def lessons_start() -> str:
+    _lessons.start()
+    return json.dumps(_les_state())
+
+
+def grant_sandbox_credits() -> None:
+    """Free credits so a hands-on lesson isn't gated by budget."""
+    if _world is not None:
+        _world.bank.balance = max(_world.bank.balance, 100000)

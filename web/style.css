@@ -53,6 +53,7 @@ canvas#board {
 .controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .controls label { color: var(--muted); display: flex; align-items: center; gap: 6px; }
 .wavemsg { color: var(--amber); }
+.placemsg { font-size: 13px; }
 
 .palette { display: flex; flex-wrap: wrap; gap: 8px; max-width: 820px; }
 .palette-head { flex-basis: 100%; color: var(--amber); }

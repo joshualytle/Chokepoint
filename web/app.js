@@ -22,15 +22,18 @@ let helpData = null;                       // {glossary, hud}
 let lastTut = "", lastLes = "";            // panel-state caches (avoid re-rendering every frame)
 let last = performance.now();
 
-const DEFAULT_LOADOUT = `# Edit build_loadout, then Run (Ctrl+Enter).
-# Available without imports: Turret(x, y, gun=...), make_gun("name").
-# Guns: sieve(auth,dns)  scatter(ids,firewall)  relay(dns,email)
-#       auditor(cloudtrail)  lance(endpoint)  quarantine(email) ...
+const DEFAULT_LOADOUT = `# The board starts empty (you have full credits).
+# Place turrets by clicking a gun in the palette, then a node on the board —
+# or build in code here and Run (Ctrl+Enter). No imports needed:
+#   Turret(x, y, gun=...), make_gun("name").
+# Guns: sieve(auth,dns)  scatter(ids,firewall)  relay(dns,email)  auditor(cloudtrail) ...
 def build_loadout(unlocked, slots):
-    return [
-        Turret(*slots[0], gun=make_gun("sieve")),     # covers auth, dns
-        Turret(*slots[1], gun=make_gun("scatter")),   # covers ids, firewall
-    ]
+    # Example — uncomment to deploy two turrets:
+    #   return [
+    #       Turret(*slots[0], gun=make_gun("sieve")),     # covers auth, dns
+    #       Turret(*slots[1], gun=make_gun("scatter")),   # covers ids, firewall
+    #   ]
+    return []
 `;
 
 async function boot() {
@@ -71,9 +74,10 @@ async function boot() {
     grant_sandbox_credits: pyodide.globals.get("grant_sandbox_credits"),
   };
 
-  const savedMap = localStorage.getItem(SK("map"));
-  const savedDiff = localStorage.getItem(SK("diff"));
-  const savedCode = localStorage.getItem(SK("loadout"));
+  const fresh = localStorage.getItem(SK("ver")) === SAVE_VERSION;   // ignore pre-clean-start saves
+  const savedMap = fresh ? localStorage.getItem(SK("map")) : null;
+  const savedDiff = fresh ? localStorage.getItem(SK("diff")) : null;
+  const savedCode = fresh ? localStorage.getItem(SK("loadout")) : null;
   const meta = JSON.parse(G.new_game(savedMap || "trunk", savedDiff || "easy"));
   fillSelect(el("mapSel"), meta.maps, savedMap || "trunk");
   fillSelect(el("diffSel"), meta.difficulties, savedDiff || "easy");
@@ -126,9 +130,11 @@ function applyLoadout() {
 
 // ------------------------------------------------------------- persistence
 const SK = (k) => "chokepoint." + k;
+const SAVE_VERSION = "2";                   // bump to invalidate older auto-saves
 
 function autoSave() {
   try {
+    localStorage.setItem(SK("ver"), SAVE_VERSION);
     localStorage.setItem(SK("loadout"), cm ? cm.getValue() : el("code").value);
     localStorage.setItem(SK("map"), el("mapSel").value);
     localStorage.setItem(SK("diff"), el("diffSel").value);
@@ -194,6 +200,15 @@ function eventToWorld(e) {
           (e.clientY - r.top) * (CH / r.height) - OFFY];
 }
 
+let placeTimer = null;
+function showPlace(msg, ok) {
+  const m = el("placeMsg");
+  m.textContent = msg;
+  m.style.color = ok ? "var(--phos)" : "var(--danger)";
+  clearTimeout(placeTimer);
+  placeTimer = setTimeout(() => { m.textContent = ""; }, 2500);
+}
+
 function wireUI() {
   el("startBtn").onclick = () => {
     if (over) return;
@@ -220,8 +235,10 @@ function wireUI() {
     const [x, y] = eventToWorld(e);
     if (buildMode) return onBuildClick(e.button, x, y);
     if (e.button === 2) { G.remove_at(x, y); refreshPalette(); }        // right-click: remove
-    else if (selectedGun) {                                            // left-click: place
-      if (JSON.parse(G.place_at(x, y)).ok) { G.tutorial_signal("place"); lastTut = ""; }
+    else {                                                             // left-click: place
+      const r = JSON.parse(G.place_at(x, y));
+      if (r.ok) { G.tutorial_signal("place"); lastTut = ""; showPlace("placed ✓", true); }
+      else showPlace(r.reason || "pick a gun in the palette first", false);
       refreshPalette();
     }
   });

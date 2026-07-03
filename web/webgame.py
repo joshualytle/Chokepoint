@@ -100,10 +100,18 @@ def select_gun(name: str) -> str:
 
 
 def place_at(x: float, y: float) -> str:
-    assert _editor is not None
+    assert _editor is not None and _world is not None
+    if _editor.selected_gun is None:
+        return json.dumps({"ok": False, "reason": "pick a gun in the palette first"})
+    gun = make_gun(_editor.selected_gun)
+    if not _world.bank.can_afford(gun.cost):
+        have = _world.bank.balance
+        return json.dumps({"ok": False,
+                           "reason": f"need {gun.cost}cr for {gun.name} (you have {have})"})
     turret = _editor.place(x, y)
     _sync()
-    return json.dumps({"ok": turret is not None})
+    return json.dumps({"ok": turret is not None,
+                       "reason": "" if turret else "click on a node (the circles on the line)"})
 
 
 def remove_at(x: float, y: float) -> str:

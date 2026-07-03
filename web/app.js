@@ -71,10 +71,13 @@ async function boot() {
     grant_sandbox_credits: pyodide.globals.get("grant_sandbox_credits"),
   };
 
-  const meta = JSON.parse(G.new_game("trunk", "easy"));
-  fillSelect(el("mapSel"), meta.maps, "trunk");
-  fillSelect(el("diffSel"), meta.difficulties, "easy");
-  el("code").value = DEFAULT_LOADOUT;
+  const savedMap = localStorage.getItem(SK("map"));
+  const savedDiff = localStorage.getItem(SK("diff"));
+  const savedCode = localStorage.getItem(SK("loadout"));
+  const meta = JSON.parse(G.new_game(savedMap || "trunk", savedDiff || "easy"));
+  fillSelect(el("mapSel"), meta.maps, savedMap || "trunk");
+  fillSelect(el("diffSel"), meta.difficulties, savedDiff || "easy");
+  el("code").value = savedCode || DEFAULT_LOADOUT;
   cm = CodeMirror.fromTextArea(el("code"), {
     mode: "python", theme: "material-darker", lineNumbers: true,
     indentUnit: 4, matchBrackets: true, autofocus: false,
@@ -118,6 +121,55 @@ function applyLoadout() {
   } else { s.textContent = res.error; s.className = "code-status err"; }
   refreshPalette();
   G.tutorial_signal("run"); lastTut = ""; lastLes = "";
+  autoSave();
+}
+
+// ------------------------------------------------------------- persistence
+const SK = (k) => "chokepoint." + k;
+
+function autoSave() {
+  try {
+    localStorage.setItem(SK("loadout"), cm ? cm.getValue() : el("code").value);
+    localStorage.setItem(SK("map"), el("mapSel").value);
+    localStorage.setItem(SK("diff"), el("diffSel").value);
+  } catch (e) { /* storage disabled/full — ignore */ }
+}
+
+function setStatus(msg, ok) {
+  const s = el("codeStatus"); s.textContent = msg; s.className = "code-status " + (ok ? "ok" : "err");
+}
+function setSelect(id, val) {
+  const s = el(id); if ([...s.options].some((o) => o.value === val)) s.value = val;
+}
+
+function exportSaveCode() {
+  const save = { v: 1, code: cm.getValue(), map: el("mapSel").value, diff: el("diffSel").value };
+  const codeStr = btoa(unescape(encodeURIComponent(JSON.stringify(save))));
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(codeStr)
+      .then(() => setStatus("save-code copied to clipboard", true))
+      .catch(() => window.prompt("Copy your save-code:", codeStr));
+  } else {
+    window.prompt("Copy your save-code:", codeStr);
+  }
+}
+
+function importSaveCode() {
+  const codeStr = window.prompt("Paste a save-code:");
+  if (!codeStr) return;
+  let save;
+  try { save = JSON.parse(decodeURIComponent(escape(atob(codeStr.trim())))); }
+  catch (e) { setStatus("invalid save-code", false); return; }
+  if (save.map) setSelect("mapSel", save.map);
+  if (save.diff) setSelect("diffSel", save.diff);
+  // fresh world on the chosen map/difficulty; load the code but DO NOT run it —
+  // the player reviews shared code and clicks Run themselves (the sandbox still applies).
+  running = false; over = false;
+  G.new_game(el("mapSel").value, el("diffSel").value);
+  cm.setValue(save.code || "");
+  refreshPalette();
+  el("startBtn").textContent = "▶ Start";
+  setStatus("loaded save-code — review the code, then click Run", true);
 }
 
 function refreshPalette() {
@@ -151,6 +203,8 @@ function wireUI() {
   };
   el("helpBtn").onclick = () => el("glossary").classList.toggle("hidden");
   el("glossClose").onclick = () => el("glossary").classList.add("hidden");
+  el("copyBtn").onclick = exportSaveCode;
+  el("loadBtn").onclick = importSaveCode;
   el("resetBtn").onclick = newGame;
   el("mapSel").onchange = newGame;
   el("diffSel").onchange = newGame;

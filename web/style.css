@@ -154,6 +154,10 @@ textarea#code {
 .code-status.ok { color: var(--phos); }
 .code-status.err { color: var(--danger); }
 
+.save-bar { display: flex; align-items: center; gap: 8px; padding: 0 12px 10px; }
+.save-bar button { padding: 5px 10px; font-size: 12px; }
+.save-note { color: var(--muted); font-size: 12px; margin-left: auto; }
+
 /* CodeMirror editor */
 .CodeMirror { height: 300px; font: 13px/1.5 "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace; }
 .editor-wrap .CodeMirror { border: 0; }

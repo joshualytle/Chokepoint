@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 
 from chokepoint.arsenal import MODULE_LIBRARY, Module, Turret, make_gun
+from chokepoint.editor import ArsenalEditor
 from chokepoint.hints import coaching
 from chokepoint.maps import MAP_LIST, MAPS
 from chokepoint.packets import DIFFICULTY_LIST, KINDS
@@ -33,19 +34,31 @@ _LOADOUT_API = {
 }
 
 _world: World | None = None
+_editor: ArsenalEditor | None = None
 
 
 def new_game(map_name: str = "trunk", difficulty: str = "easy") -> str:
-    global _world
+    global _world, _editor
     if map_name not in MAPS:
         map_name = MAP_LIST[0]
     _world = World(MAPS[map_name].copy(), difficulty=difficulty)
     _world.paused = True                 # start on the wave preview; UI presses Start
+    _editor = ArsenalEditor(_world.unlocked(), bank=_world.bank)
     return json.dumps({"ok": True, "maps": MAP_LIST, "difficulties": DIFFICULTY_LIST})
 
 
+def _sync() -> None:
+    """Push the editor's placements to the world and re-derive gate routing."""
+    assert _world is not None and _editor is not None
+    _world.set_turrets(_editor.to_turrets())
+    _world.set_gates(_editor.to_gates())
+    _world.set_limiters(_editor.to_limiters())
+    _world.autoroute()
+
+
 def load_loadout(src: str) -> str:
-    """Exec the player's build_loadout and deploy the turrets it returns."""
+    """Exec the player's build_loadout (sandboxed) and deploy what it returns."""
+    global _editor
     assert _world is not None
     try:
         ns = safe_exec(src, _LOADOUT_API)   # sandboxed: no arbitrary imports / escapes
@@ -56,9 +69,45 @@ def load_loadout(src: str) -> str:
         return json.dumps({"ok": False, "error": f"blocked: {err}"})
     except Exception as err:  # report author errors to the editor, never crash
         return json.dumps({"ok": False, "error": f"{type(err).__name__}: {err}"})
-    _world.set_turrets(turrets)
-    _world.autoroute()
-    return json.dumps({"ok": True, "turrets": len(turrets)})
+    _editor = ArsenalEditor(_world.unlocked(), bank=_world.bank)
+    dropped = _editor.seed_purchase(turrets)
+    _sync()
+    return json.dumps({"ok": True, "turrets": len(turrets) - len(dropped),
+                       "dropped": len(dropped)})
+
+
+# ---- interactive placement (reuses the pure ArsenalEditor state machine) ----
+def palette_json() -> str:
+    assert _world is not None and _editor is not None
+    _editor.set_unlocked(_world.unlocked())
+    out = []
+    for name in _editor.available_guns():
+        g = make_gun(name)
+        out.append({"name": name, "cost": g.cost, "accepts": sorted(g.accepts),
+                    "colors": [list(KINDS[k]["color"]) for k in sorted(g.accepts)],
+                    "afford": _world.bank.can_afford(g.cost),
+                    "selected": name == _editor.selected_gun})
+    return json.dumps(out)
+
+
+def select_gun(name: str) -> str:
+    assert _editor is not None
+    _editor.select_gun(name)
+    return json.dumps({"selected": _editor.selected_gun})
+
+
+def place_at(x: float, y: float) -> str:
+    assert _editor is not None
+    turret = _editor.place(x, y)
+    _sync()
+    return json.dumps({"ok": turret is not None})
+
+
+def remove_at(x: float, y: float) -> str:
+    assert _editor is not None
+    ok = _editor.remove_at(x, y)
+    _sync()
+    return json.dumps({"ok": ok})
 
 
 def set_paused(flag: bool) -> None:

@@ -15,6 +15,7 @@ const el = (id) => document.getElementById(id);
 let G = null;                              // Python bridge function handles
 let cm = null;                             // CodeMirror editor instance
 let running = false, over = false;
+let selectedGun = null;                    // gun chosen in the palette (click to place)
 let last = performance.now();
 
 const DEFAULT_LOADOUT = `# Edit build_loadout, then Run (Ctrl+Enter).
@@ -44,6 +45,10 @@ async function boot() {
     begin: pyodide.globals.get("begin"),
     set_paused: pyodide.globals.get("set_paused"),
     snapshot_json: pyodide.globals.get("snapshot_json"),
+    palette_json: pyodide.globals.get("palette_json"),
+    select_gun: pyodide.globals.get("select_gun"),
+    place_at: pyodide.globals.get("place_at"),
+    remove_at: pyodide.globals.get("remove_at"),
   };
 
   const meta = JSON.parse(G.new_game("trunk", "easy"));
@@ -56,6 +61,7 @@ async function boot() {
     extraKeys: { "Ctrl-Enter": applyLoadout, "Cmd-Enter": applyLoadout },
   });
   applyLoadout();
+  refreshPalette();
 
   wireUI();
   el("boot").classList.add("hidden");
@@ -76,6 +82,7 @@ function newGame() {
   running = false; over = false;
   G.new_game(el("mapSel").value, el("diffSel").value);
   applyLoadout();
+  refreshPalette();
   el("startBtn").textContent = "▶ Start";
 }
 
@@ -83,8 +90,33 @@ function applyLoadout() {
   const src = cm ? cm.getValue() : el("code").value;
   const res = JSON.parse(G.load_loadout(src));
   const s = el("codeStatus");
-  if (res.ok) { s.textContent = `deployed ${res.turrets} turret(s)`; s.className = "code-status ok"; }
-  else { s.textContent = res.error; s.className = "code-status err"; }
+  if (res.ok) {
+    s.textContent = `deployed ${res.turrets} turret(s)` + (res.dropped ? ` (${res.dropped} over budget)` : "");
+    s.className = "code-status ok";
+  } else { s.textContent = res.error; s.className = "code-status err"; }
+  refreshPalette();
+}
+
+function refreshPalette() {
+  const items = JSON.parse(G.palette_json());
+  selectedGun = (items.find((g) => g.selected) || {}).name || null;
+  el("palette").innerHTML =
+    `<div class="palette-head">GUNS — click one, then click a node on the board (right-click a turret to remove)</div>` +
+    items.map((g) => `
+      <button class="gun ${g.selected ? "sel" : ""} ${g.afford ? "" : "poor"}" data-gun="${g.name}">
+        <span class="gun-name">${g.name}</span><span class="gun-cost">${g.cost}cr</span>
+        <span class="gun-kinds">${g.accepts.map((k, i) =>
+          `<span class="sw" style="background:${rgb(g.colors[i])}"></span>${k}`).join(" ")}</span>
+      </button>`).join("");
+  el("palette").querySelectorAll("button.gun").forEach((b) => {
+    b.onclick = () => { G.select_gun(b.dataset.gun); refreshPalette(); };
+  });
+}
+
+function eventToWorld(e) {
+  const r = canvas.getBoundingClientRect();
+  return [(e.clientX - r.left) * (CW / r.width) - OFFX,
+          (e.clientY - r.top) * (CH / r.height) - OFFY];
 }
 
 function wireUI() {
@@ -98,6 +130,13 @@ function wireUI() {
   el("mapSel").onchange = newGame;
   el("diffSel").onchange = newGame;
   el("runBtn").onclick = applyLoadout;   // CodeMirror handles Ctrl/Cmd-Enter + Tab
+
+  canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+  canvas.addEventListener("mousedown", (e) => {
+    const [x, y] = eventToWorld(e);
+    if (e.button === 2) { G.remove_at(x, y); refreshPalette(); }        // right-click: remove
+    else if (selectedGun) { G.place_at(x, y); refreshPalette(); }       // left-click: place
+  });
 }
 
 function frame(now) {

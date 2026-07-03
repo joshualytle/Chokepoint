@@ -80,6 +80,33 @@ button.primary:hover { background: #16493d; }
 
 .board-stack { position: relative; width: 820px; max-width: 100%; }
 
+.controls .speed { color: var(--muted); display: flex; align-items: center; gap: 4px; }
+.controls .spd { padding: 5px 9px; }
+
+/* board hover tooltip */
+.board-tip {
+  position: absolute; z-index: 5; pointer-events: none;
+  background: var(--panel2); border: 1px solid var(--phos); border-radius: 5px;
+  padding: 6px 9px; font-size: 12px; color: var(--ink); max-width: 260px;
+}
+.board-tip.hidden { display: none; }
+.board-tip b { color: var(--phos); }
+
+/* game-over / debrief overlay */
+.board-overlay {
+  position: absolute; inset: 0; z-index: 6;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  background: rgba(6, 10, 16, 0.9); border-radius: 8px; text-align: center; padding: 20px;
+}
+.board-overlay.hidden { display: none; }
+.board-overlay h2 { margin: 0; letter-spacing: 1px; }
+.board-overlay h2.won { color: var(--phos); }
+.board-overlay h2.lost { color: var(--danger); }
+.board-overlay .ov-sub { color: var(--muted); }
+.board-overlay .ov-cause { color: var(--ink); margin-top: 8px; max-width: 620px; }
+.board-overlay .ov-lines { color: var(--danger); margin: 8px 0; text-align: left; max-width: 620px; }
+.board-overlay button { margin-top: 8px; }
+
 /* guided tutorial card, docked over the bottom of the board */
 .tutorial {
   position: absolute; left: 12px; right: 12px; bottom: 12px;

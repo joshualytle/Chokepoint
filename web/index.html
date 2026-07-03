@@ -20,11 +20,19 @@
     <section class="board-col">
       <div class="board-stack">
         <canvas id="board" width="820" height="620"></canvas>
+        <div id="boardTip" class="board-tip hidden"></div>
+        <div id="boardOverlay" class="board-overlay hidden"></div>
         <div id="tutorial" class="tutorial hidden"></div>
       </div>
       <div class="controls">
         <button id="startBtn" class="primary">▶ Start</button>
         <button id="resetBtn">Reset</button>
+        <button id="stepBtn" title="Advance one tick (while paused)">⏭ Step</button>
+        <span class="speed">speed
+          <button class="spd" data-spd="1">1×</button>
+          <button class="spd" data-spd="2">2×</button>
+          <button class="spd" data-spd="3">3×</button>
+        </span>
         <button id="buildBtn">🔧 Build</button>
         <button id="helpBtn">❔ Help</button>
         <label>map

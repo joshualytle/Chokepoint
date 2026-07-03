@@ -20,6 +20,8 @@ let buildMode = false, edgeSrc = null;     // topology editing state
 let mouseW = [0, 0];                       // last mouse position in world coords
 let helpData = null;                       // {glossary, hud}
 let lastTut = "", lastLes = "";            // panel-state caches (avoid re-rendering every frame)
+let snap = null;                           // latest snapshot (for hover tooltips)
+let speed = 1;                             // sim speed multiplier
 let last = performance.now();
 
 const DEFAULT_LOADOUT = `# The board starts empty (you have full credits).
@@ -220,6 +222,14 @@ function wireUI() {
   el("glossClose").onclick = () => el("glossary").classList.add("hidden");
   el("copyBtn").onclick = exportSaveCode;
   el("loadBtn").onclick = importSaveCode;
+  el("stepBtn").onclick = () => { if (!over) G.step(1 / 60); };
+  document.querySelectorAll("button.spd").forEach((b) => {
+    if (+b.dataset.spd === speed) b.classList.add("primary");
+    b.onclick = () => {
+      speed = +b.dataset.spd;
+      document.querySelectorAll("button.spd").forEach((x) => x.classList.toggle("primary", x === b));
+    };
+  });
   el("resetBtn").onclick = newGame;
   el("mapSel").onchange = newGame;
   el("diffSel").onchange = newGame;
@@ -230,7 +240,8 @@ function wireUI() {
   };
 
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
-  canvas.addEventListener("mousemove", (e) => { mouseW = eventToWorld(e); });
+  canvas.addEventListener("mousemove", (e) => { mouseW = eventToWorld(e); updateBoardTip(e); });
+  canvas.addEventListener("mouseleave", () => el("boardTip").classList.add("hidden"));
   canvas.addEventListener("mousedown", (e) => {
     const [x, y] = eventToWorld(e);
     if (buildMode) return onBuildClick(e.button, x, y);
@@ -261,15 +272,67 @@ function onBuildClick(button, x, y) {
 function frame(now) {
   const dt = Math.min((now - last) / 1000, 0.05);
   last = now;
-  if (running && !over) G.step(dt);
+  if (running && !over) { for (let i = 0; i < speed; i++) G.step(dt); }
   const s = JSON.parse(G.snapshot_json());
+  snap = s;
   over = s.over;
   if (over && running) { running = false; el("startBtn").textContent = "▶ Start"; }
   render(s);
+  if (selectedGun && !buildMode) drawPlacePreview(s);
   if (buildMode) drawBuildOverlay(s);
   updateHUD(s);
+  renderOverlay(s);
   tickPanels();
   requestAnimationFrame(frame);
+}
+
+function drawPlacePreview(s) {
+  let best = null, bd = 1e9;
+  for (const n of s.nodes) { const d = (n.x - mouseW[0]) ** 2 + (n.y - mouseW[1]) ** 2; if (d < bd) { bd = d; best = n; } }
+  if (!best || bd > 60 * 60) return;
+  ctx.strokeStyle = "#38e1b0"; ctx.lineWidth = 2; ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.arc(sx(best.x), sy(best.y), 15, 0, 7); ctx.stroke(); ctx.setLineDash([]);
+}
+
+function renderOverlay(s) {
+  const box = el("boardOverlay");
+  if (!s.over) { box.classList.add("hidden"); return; }
+  box.classList.remove("hidden");
+  let html = `<h2 class="${s.won ? "won" : "lost"}">${s.won ? "PIPELINE HELD ✓" : "PIPELINE OVERWHELMED ✕"}</h2>`;
+  html += `<div class="ov-sub">waves cleared ${Math.max(0, s.wave - 1)} · leaks ${s.leaks}/${s.max_leaks}</div>`;
+  if (s.debrief) {
+    html += `<div class="ov-cause">${s.debrief.cause}</div>`;
+    html += `<div class="ov-lines">${s.debrief.lines.slice(0, 6).map((l) => `<div>• ${l}</div>`).join("")}</div>`;
+  }
+  html += `<button id="ovRetry" class="primary">Retry</button>`;
+  box.innerHTML = html;
+  el("ovRetry").onclick = () => { box.classList.add("hidden"); newGame(); };
+}
+
+// board hover tooltips (node / turret) — a key training aid
+function updateBoardTip(e) {
+  const box = el("boardTip");
+  if (!snap || buildMode) { box.classList.add("hidden"); return; }
+  const [x, y] = mouseW;
+  let tip = null;
+  for (const t of snap.turrets) if ((t.x - x) ** 2 + (t.y - y) ** 2 <= 16 * 16) { tip = turretTip(t); break; }
+  if (!tip) for (const n of snap.nodes) if ((n.x - x) ** 2 + (n.y - y) ** 2 <= 16 * 16) { tip = nodeTip(n); break; }
+  if (!tip) { box.classList.add("hidden"); return; }
+  box.innerHTML = tip;
+  box.classList.remove("hidden");
+  const r = canvas.getBoundingClientRect();
+  box.style.left = (e.clientX - r.left + 14) + "px";
+  box.style.top = (e.clientY - r.top + 14) + "px";
+}
+function turretTip(t) {
+  return `<b>${t.id}: ${t.gun}</b><br>${t.desc}<br>accepts: ${t.accepts.join(", ")}<br>throughput ${t.dps}/s`;
+}
+function nodeTip(n) {
+  const role = n.source ? "source" : n.sink ? "sink" : "node";
+  let s = `<b>${role} ${n.id}</b><br>queue ${n.queue}/${n.cap}`;
+  s += `<br>serves: ${n.served.length ? n.served.join(", ") : "(pass-through)"}`;
+  if (n.queue) s += `<br>oldest wait ${n.oldest}s / grace ${n.grace}s${n.oldest > n.grace ? " — BLEEDING" : ""}`;
+  return s;
 }
 
 // ------------------------------------------------- tutorial + lessons panels

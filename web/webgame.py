@@ -24,10 +24,11 @@ from chokepoint.glossary import GLOSSARY, HUD_HELP
 from chokepoint.hints import coaching
 from chokepoint.lessons import Lessons
 from chokepoint.maps import MAP_LIST, MAPS
+from chokepoint.metrics import summarize_failure
 from chokepoint.packets import DIFFICULTY_LIST, KINDS
 from chokepoint.parsers import Parser
 from chokepoint.safety import SafetyError, safe_exec
-from chokepoint.simulation import MAX_LEAK, START_HEALTH, World
+from chokepoint.simulation import DWELL_GRACE, MAX_LEAK, QUEUE_CAP, START_HEALTH, World
 from chokepoint.tutorial import Step, Tutorial
 
 # the game objects a loadout may use, injected so no imports are even required
@@ -218,7 +219,17 @@ def snapshot() -> dict:
     nodes = []
     for nid in m.nodes:
         x, y = m.pos(nid)
-        nodes.append({"id": nid, "x": x, "y": y, "queue": len(w.queue_at(nid)),
+        q = w.queue_at(nid)
+        served: set[str] = set()
+        for t in w.turrets:
+            if t.node == nid:
+                served |= t.accepts()
+        lim = w.limiter_at(nid)
+        nodes.append({"id": nid, "x": x, "y": y, "queue": len(q),
+                      "cap": lim.buffer_cap if lim is not None else QUEUE_CAP,
+                      "served": sorted(served),
+                      "oldest": round(max((p.wait for p in q), default=0.0), 1),
+                      "grace": DWELL_GRACE,
                       "source": nid == m.source, "sink": nid == m.sink})
     edges = [{"a": a, "b": b, "ax": m.pos(a)[0], "ay": m.pos(a)[1],
               "bx": m.pos(b)[0], "by": m.pos(b)[1]} for a, b in m.edges()]
@@ -227,9 +238,14 @@ def snapshot() -> dict:
         x, y = _packet_xy(p, m)
         packets.append({"x": x, "y": y, "kind": p.kind, "color": list(KINDS[p.kind]["color"])})
     turrets = [{"x": t.x, "y": t.y, "id": t.id, "node": t.node,
+                "gun": t.gun.name, "desc": t.gun.desc, "dps": round(t.dps(), 1),
                 "accepts": sorted(t.accepts()),
                 "colors": [list(KINDS[k]["color"]) for k in sorted(t.accepts())]}
                for t in w.turrets]
+    debrief = None
+    if w.over and not w.won:
+        d = summarize_failure(w)
+        debrief = {"cause": d.cause, "lines": list(d.lines)}
     stats = {k: {"in": s.spawned, "ok": s.handled, "leak": s.leaked, "now": s.inflight,
                  "color": list(KINDS[k]["color"]), "gap": k in gaps}
              for k, s in w.stats.items() if s.spawned}
@@ -242,7 +258,7 @@ def snapshot() -> dict:
         "health": round(w.health, 1), "max_health": START_HEALTH,
         "leaks": w.leaks, "max_leaks": MAX_LEAK, "credits": w.bank.balance,
         "coverage_gaps": gaps, "over": w.over, "won": w.won, "paused": w.paused,
-        "started": w.started, "upcoming": upcoming, "coach": coach,
+        "started": w.started, "upcoming": upcoming, "coach": coach, "debrief": debrief,
         "unlocked": sorted(w.unlocked()),
         "nodes": nodes, "edges": edges, "packets": packets,
         "turrets": turrets, "stats": stats,

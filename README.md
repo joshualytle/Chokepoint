@@ -39,6 +39,21 @@ python serve_web.py                   # serve on http://localhost:8000 (and your
 The desktop build is unchanged (`python -m chokepoint`); the web build is an
 additional target that reuses the same code behind an async render loop.
 
+### Web-native app (recommended) — `web/`
+
+There's also a **native-web** version with a crisp HTML/canvas UI and a real code
+editor (CodeMirror). The whole Python core + your `loadout.py` run in the browser
+via [Pyodide](https://pyodide.org/); player code is **sandboxed** (`safety.py`)
+so it can't import arbitrary modules or reach the network/DOM.
+
+```bash
+python serve_native.py               # http://localhost:8001 (packages the core for Pyodide)
+```
+
+It's just static files, so it hosts anywhere. Pushing to `main` auto-deploys it
+to **GitHub Pages** via `.github/workflows/pages.yml` (one-time: Settings → Pages
+→ Source: *GitHub Actions*).
+
 ## Two ways to lose
 
 - **Loss (leaks):** a kind no turret accepts flows to the exit, or a node's

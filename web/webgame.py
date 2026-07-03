@@ -277,6 +277,27 @@ def help_json() -> str:
     return json.dumps({"glossary": [list(g) for g in GLOSSARY], "hud": HUD_HELP})
 
 
+# ---- metrics dashboard (the pure Telemetry backend) ----
+def metrics_json() -> str:
+    assert _world is not None
+    tel = _world.telemetry
+    kinds = {}
+    for k, v in tel.kind_summary().items():
+        lat = tel.latency.get(k)
+        kinds[k] = {"in": v.spawned, "ok": v.handled, "leak": v.leaked, "peak": v.peak_inflight,
+                    "p50": round(lat.percentile(50), 1) if lat else 0.0,
+                    "p95": round(lat.percentile(95), 1) if lat else 0.0,
+                    "color": list(KINDS[k]["color"])}
+    nodes = {n: {"peak": v.peak_queue, "drops": v.overflow_drops, "load": round(v.load_fraction, 2)}
+             for n, v in tel.node_summary().items()}
+    trend = [{"t": p.t, "health": round(p.health, 1)} for p in tel.trend]
+    eff = tel.efficiency(_world)
+    return json.dumps({"kinds": kinds, "nodes": nodes, "trend": trend,
+                       "cost_per_handled": round(eff["cost_per_handled"], 1),
+                       "deployed_cost": eff["deployed_cost"], "handled": eff["handled"],
+                       "max_health": START_HEALTH})
+
+
 # ---- guided tutorial (reuses the pure Tutorial class, web-tailored steps) ----
 _WEB_TUTORIAL = [
     Step("Welcome to Chokepoint", [

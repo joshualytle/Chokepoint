@@ -22,6 +22,7 @@ let helpData = null;                       // {glossary, hud}
 let lastTut = "", lastLes = "";            // panel-state caches (avoid re-rendering every frame)
 let snap = null;                           // latest snapshot (for hover tooltips)
 let speed = 1;                             // sim speed multiplier
+let frameN = 0;                            // frame counter (throttle live metrics)
 let last = performance.now();
 
 const DEFAULT_LOADOUT = `# The board starts empty (you have full credits).
@@ -74,6 +75,7 @@ async function boot() {
     lessons_skip: pyodide.globals.get("lessons_skip"),
     lessons_start: pyodide.globals.get("lessons_start"),
     grant_sandbox_credits: pyodide.globals.get("grant_sandbox_credits"),
+    metrics_json: pyodide.globals.get("metrics_json"),
   };
 
   const fresh = localStorage.getItem(SK("ver")) === SAVE_VERSION;   // ignore pre-clean-start saves
@@ -220,6 +222,8 @@ function wireUI() {
   };
   el("helpBtn").onclick = () => el("glossary").classList.toggle("hidden");
   el("glossClose").onclick = () => el("glossary").classList.add("hidden");
+  el("metricsBtn").onclick = () => { el("metrics").classList.toggle("hidden"); renderMetrics(); };
+  el("metricsClose").onclick = () => el("metrics").classList.add("hidden");
   el("copyBtn").onclick = exportSaveCode;
   el("loadBtn").onclick = importSaveCode;
   el("stepBtn").onclick = () => { if (!over) G.step(1 / 60); };
@@ -290,7 +294,42 @@ function frame(now) {
   updateHUD(s);
   renderOverlay(s);
   tickPanels();
+  frameN++;
+  if (frameN % 15 === 0 && !el("metrics").classList.contains("hidden")) renderMetrics();  // live
   requestAnimationFrame(frame);
+}
+
+function renderMetrics() {
+  const m = JSON.parse(G.metrics_json());
+  const kindRows = Object.entries(m.kinds).map(([k, v]) =>
+    `<tr><td><span class="sw" style="background:${rgb(v.color)}"></span>${k}</td>
+     <td>${v.in}</td><td>${v.ok}</td><td>${v.leak}</td><td>${v.peak}</td><td>${v.p50}s</td><td>${v.p95}s</td></tr>`).join("");
+  const nodeRows = Object.entries(m.nodes).map(([n, v]) =>
+    `<tr><td>${n}</td><td>${v.peak}</td><td>${v.drops}</td><td>${Math.round(v.load * 100)}%</td></tr>`).join("");
+  const empty = (c) => `<tr><td colspan="${c}" style="color:var(--muted)">no data yet — run a wave</td></tr>`;
+  el("metricsBody").innerHTML = `
+    <div class="m-kpi">cost / handled: <b>${m.cost_per_handled}cr</b>
+      <span>(fleet ${m.deployed_cost}cr · ${m.handled} handled — the over-provisioning KPI)</span></div>
+    <canvas id="trendCanvas" width="600" height="90"></canvas>
+    <h4>By kind</h4>
+    <table class="kinds"><tr><th>kind</th><th>in</th><th>ok</th><th>leak</th><th>peak</th><th>p50</th><th>p95</th></tr>${kindRows || empty(7)}</table>
+    <h4>By node — peak queue / overflow drops / time busy</h4>
+    <table class="kinds"><tr><th>node</th><th>peak</th><th>drops</th><th>load</th></tr>${nodeRows || empty(4)}</table>`;
+  drawTrend(m.trend, m.max_health);
+}
+
+function drawTrend(trend, maxH) {
+  const c = el("trendCanvas"); if (!c) return;
+  const g = c.getContext("2d"); g.clearRect(0, 0, c.width, c.height);
+  g.fillStyle = "#93a6b8"; g.font = "11px monospace"; g.fillText("health over time", 6, 12);
+  if (trend.length < 2) return;
+  g.strokeStyle = "#38e1b0"; g.lineWidth = 2; g.beginPath();
+  trend.forEach((p, i) => {
+    const x = i / (trend.length - 1) * c.width;
+    const y = c.height - (p.health / maxH) * (c.height - 16) - 4;
+    i ? g.lineTo(x, y) : g.moveTo(x, y);
+  });
+  g.stroke();
 }
 
 function drawPlacePreview(s) {

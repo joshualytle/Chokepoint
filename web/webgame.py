@@ -110,6 +110,70 @@ def remove_at(x: float, y: float) -> str:
     return json.dumps({"ok": ok})
 
 
+# ---- build mode: edit the topology (add/remove nodes and edges) ----
+def _rebind_after_topology() -> None:
+    """Drop only packets stranded by a removed node, then re-snap all devices."""
+    assert _world is not None
+    valid = _world.map.nodes
+    _world.packets = [p for p in _world.packets
+                      if p.at in valid and (p.moving_to is None or p.moving_to in valid)]
+    _sync()
+
+
+def node_at(x: float, y: float, tol: float = 18.0) -> str:
+    assert _world is not None
+    m = _world.map
+    if not m.nodes:
+        return ""
+    nid = m.nearest_node(x, y)
+    nx, ny = m.pos(nid)
+    return nid if (nx - x) ** 2 + (ny - y) ** 2 <= tol * tol else ""
+
+
+def edge_at(x: float, y: float, tol: float = 9.0) -> str:
+    assert _world is not None
+    m = _world.map
+    best, best_d = "", tol
+    for a, b in m.edges():
+        ax, ay = m.pos(a)
+        bx, by = m.pos(b)
+        dx, dy = bx - ax, by - ay
+        seg = dx * dx + dy * dy
+        t = 0.0 if seg == 0 else max(0.0, min(1.0, ((x - ax) * dx + (y - ay) * dy) / seg))
+        d = ((x - (ax + t * dx)) ** 2 + (y - (ay + t * dy)) ** 2) ** 0.5
+        if d < best_d:
+            best_d, best = d, f"{a},{b}"
+    return best
+
+
+def add_node(x: float, y: float) -> str:
+    assert _world is not None
+    _world.map.add_node(x, y)
+    _rebind_after_topology()
+    return json.dumps({"ok": True})
+
+
+def add_edge(a: str, b: str) -> str:
+    assert _world is not None
+    ok = _world.map.add_edge(a, b)
+    _rebind_after_topology()
+    return json.dumps({"ok": ok})
+
+
+def remove_node(nid: str) -> str:
+    assert _world is not None
+    ok = _world.map.remove_node(nid)
+    _rebind_after_topology()
+    return json.dumps({"ok": ok})
+
+
+def remove_edge(a: str, b: str) -> str:
+    assert _world is not None
+    ok = _world.map.remove_edge(a, b)
+    _rebind_after_topology()
+    return json.dumps({"ok": ok})
+
+
 def set_paused(flag: bool) -> None:
     if _world is not None:
         _world.paused = bool(flag)

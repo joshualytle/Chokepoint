@@ -16,6 +16,8 @@ let G = null;                              // Python bridge function handles
 let cm = null;                             // CodeMirror editor instance
 let running = false, over = false;
 let selectedGun = null;                    // gun chosen in the palette (click to place)
+let buildMode = false, edgeSrc = null;     // topology editing state
+let mouseW = [0, 0];                       // last mouse position in world coords
 let last = performance.now();
 
 const DEFAULT_LOADOUT = `# Edit build_loadout, then Run (Ctrl+Enter).
@@ -49,6 +51,12 @@ async function boot() {
     select_gun: pyodide.globals.get("select_gun"),
     place_at: pyodide.globals.get("place_at"),
     remove_at: pyodide.globals.get("remove_at"),
+    node_at: pyodide.globals.get("node_at"),
+    edge_at: pyodide.globals.get("edge_at"),
+    add_node: pyodide.globals.get("add_node"),
+    add_edge: pyodide.globals.get("add_edge"),
+    remove_node: pyodide.globals.get("remove_node"),
+    remove_edge: pyodide.globals.get("remove_edge"),
   };
 
   const meta = JSON.parse(G.new_game("trunk", "easy"));
@@ -130,13 +138,33 @@ function wireUI() {
   el("mapSel").onchange = newGame;
   el("diffSel").onchange = newGame;
   el("runBtn").onclick = applyLoadout;   // CodeMirror handles Ctrl/Cmd-Enter + Tab
+  el("buildBtn").onclick = () => {
+    buildMode = !buildMode; edgeSrc = null;
+    el("buildBtn").classList.toggle("primary", buildMode);
+  };
 
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+  canvas.addEventListener("mousemove", (e) => { mouseW = eventToWorld(e); });
   canvas.addEventListener("mousedown", (e) => {
     const [x, y] = eventToWorld(e);
+    if (buildMode) return onBuildClick(e.button, x, y);
     if (e.button === 2) { G.remove_at(x, y); refreshPalette(); }        // right-click: remove
     else if (selectedGun) { G.place_at(x, y); refreshPalette(); }       // left-click: place
   });
+}
+
+function onBuildClick(button, x, y) {
+  const node = G.node_at(x, y);
+  if (button === 2) {                       // right-click: cancel / remove
+    if (edgeSrc) { edgeSrc = null; return; }
+    if (node) { G.remove_node(node); return; }
+    const edge = G.edge_at(x, y);
+    if (edge) G.remove_edge(...edge.split(","));
+    return;
+  }
+  if (!node) { G.add_node(x, y); return; }   // empty space: new node
+  if (!edgeSrc) { edgeSrc = node; }          // first node of an edge
+  else { if (edgeSrc !== node) G.add_edge(edgeSrc, node); edgeSrc = null; }
 }
 
 function frame(now) {
@@ -147,8 +175,22 @@ function frame(now) {
   over = s.over;
   if (over && running) { running = false; el("startBtn").textContent = "▶ Start"; }
   render(s);
+  if (buildMode) drawBuildOverlay(s);
   updateHUD(s);
   requestAnimationFrame(frame);
+}
+
+function drawBuildOverlay(s) {
+  ctx.fillStyle = "#38e1b0"; ctx.font = "13px monospace";
+  ctx.fillText("BUILD: click empty = node · click node then node = edge · RMB node/edge = remove", 10, 16);
+  if (edgeSrc) {
+    const n = s.nodes.find((nn) => nn.id === edgeSrc);
+    if (n) {
+      ctx.strokeStyle = "#38e1b0"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(sx(n.x), sy(n.y), 18, 0, 7); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(sx(n.x), sy(n.y)); ctx.lineTo(sx(mouseW[0]), sy(mouseW[1])); ctx.stroke();
+    }
+  }
 }
 
 // ---------------------------------------------------------------- rendering

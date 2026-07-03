@@ -83,6 +83,7 @@ button.primary:hover { background: #16493d; }
 
 .controls .speed { color: var(--muted); display: flex; align-items: center; gap: 4px; }
 .controls .spd { padding: 5px 9px; }
+.controls .autopause { color: var(--muted); display: flex; align-items: center; gap: 5px; cursor: pointer; }
 
 /* board hover tooltip */
 .board-tip {

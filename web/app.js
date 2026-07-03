@@ -23,6 +23,7 @@ let lastTut = "", lastLes = "";            // panel-state caches (avoid re-rende
 let snap = null;                           // latest snapshot (for hover tooltips)
 let speed = 1;                             // sim speed multiplier
 let frameN = 0;                            // frame counter (throttle live metrics)
+let lastLeaks = 0;                         // for auto-pause-on-leak
 let last = performance.now();
 
 const DEFAULT_LOADOUT = `# The board starts empty (you have full credits).
@@ -287,6 +288,11 @@ function frame(now) {
   const s = JSON.parse(G.snapshot_json());
   snap = s;
   over = s.over;
+  if (running && el("autoPause").checked && s.leaks > lastLeaks && !s.over) {  // pause on a fresh leak
+    running = false; G.set_paused(true); el("startBtn").textContent = "▶ Start";
+    showPlace("a leak got through — paused. Check the coach, then Start.", false);
+  }
+  lastLeaks = s.leaks;
   if (over && running) { running = false; el("startBtn").textContent = "▶ Start"; }
   render(s);
   if (selectedGun && !buildMode) drawPlacePreview(s);
@@ -486,6 +492,17 @@ function render(s) {
     ctx.strokeStyle = "#38e1b0"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sx(t.x), sy(t.y), 12, 0, 7); ctx.stroke();
     ctx.fillStyle = "#38e1b0"; ctx.font = "12px monospace"; ctx.fillText(t.id, sx(t.x) - 8, sy(t.y) - 18);
     t.colors.forEach((c, i) => { ctx.fillStyle = rgb(c); ctx.fillRect(sx(t.x) - 12 + i * 6, sy(t.y) + 14, 5, 5); });
+  }
+  // bottleneck callout: ring + label the most backed-up node when it's serious
+  let worst = null;
+  for (const n of s.nodes) if (!worst || n.queue > worst.queue) worst = n;
+  if (worst && worst.queue > worst.cap - 2) {
+    ctx.strokeStyle = "#e5556e"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(sx(worst.x), sy(worst.y), 22, 0, 7); ctx.stroke();
+    ctx.fillStyle = "#e5556e"; ctx.font = "12px monospace";
+    ctx.fillText("BOTTLENECK", sx(worst.x) - 34, sy(worst.y) + 40);
+    ctx.fillStyle = "#f2c85a";
+    ctx.fillText("add a turret, a limiter, or a parallel branch", sx(worst.x) - 130, sy(worst.y) + 56);
   }
 }
 

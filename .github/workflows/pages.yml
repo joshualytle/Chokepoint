@@ -4,11 +4,14 @@ name: Deploy web-native app to GitHub Pages
 # publishes the static web/ folder to GitHub Pages on every push to main.
 # One-time setup: Settings -> Pages -> Build and deployment -> Source: GitHub Actions.
 
+# Manual only: this does nothing until you opt in. To publish the web-native app,
+# first enable Pages (Settings -> Pages -> Source: GitHub Actions), then run this
+# workflow from the Actions tab (or flip the commented trigger below back on).
 on:
-  push:
-    branches: [main]
-    paths: ["web/**", "src/chokepoint/**", "serve_native.py", ".github/workflows/pages.yml"]
   workflow_dispatch:
+  # push:
+  #   branches: [main]
+  #   paths: ["web/**", "src/chokepoint/**", "serve_native.py", ".github/workflows/pages.yml"]
 
 permissions:
   contents: read

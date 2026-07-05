@@ -23,20 +23,18 @@ make check                          # ruff + mypy + tests, all green
 
 Requires Python 3.11+ and pygame 2.6+.
 
-### Play in the browser (optional)
+### Play in the browser (`web/`)
 
-The game also builds to WebAssembly with [pygbag](https://pypi.org/project/pygbag/),
-so it runs in a browser with no install for players:
+There's a native-web version (crisp HTML/canvas UI + a CodeMirror editor). The
+Python core + your `loadout.py` run in the browser via
+[Pyodide](https://pyodide.org/); player code is sandboxed (`safety.py`).
 
 ```bash
-pip install -e ".[web]"
-python -m pygbag --build main.py    # emits build/web/
-python serve_web.py                 # http://localhost:8000  (and http://<your-lan-ip>:8000)
+python serve_native.py    # http://localhost:8001  (and http://<your-lan-ip>:8001)
 ```
 
-`serve_web.py` is a small static server tuned for the pygbag build (it proxies
-the runtime, fixes the WASM mimetype, and snaps the device-pixel-ratio so text
-stays crisp on scaled displays). The desktop build is unaffected.
+`serve_native.py` packages the Python core into `web/chokepoint.zip` and serves
+the static `web/` folder — so it also hosts on any static host (see README).
 
 ## Controls
 

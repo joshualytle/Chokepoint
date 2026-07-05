@@ -76,12 +76,16 @@ llm_assist.py  optional local-LLM diagnostics over stdlib urllib; degrades to a
                friendly message if no model is running. localhost only.
 ```
 
-There are two entry points outside the package: `main.py` (browser/WASM via
-pygbag; async loop) and `serve_web.py` (a static dev server for `build/web`).
+Two front ends: the **desktop** pygame app (`python -m chokepoint` → `render.py`)
+and the **native-web** app in `web/` — a Pyodide + HTML/canvas UI where the same
+pure core runs in the browser, driven by `web/webgame.py` (a JSON bridge) and
+served by `serve_native.py`. Player code (loadout.py) is sandboxed by `safety.py`
+(AST allowlist + restricted builtins) before exec, on the web especially. The
+glossary lives in `glossary.py`; both UIs reuse the pure hints/tutorial/lessons.
 
 Dependency direction: packets/arsenal/maps → economy/gates/limiter/parsers →
-simulation → metrics/hints/editor/loadout/llm_assist → render. tutorial/
-codebuffer/syntax/scores are leaf helpers used by render.
+simulation → metrics/hints/editor/loadout/llm_assist → render. tutorial/lessons/
+glossary/safety/codebuffer/syntax/scores are leaf helpers used by the UIs.
 
 ## Invariants — keep these true
 
@@ -109,8 +113,8 @@ Done: the flow-network core (graph + queues, turrets drain a node's queue, dwell
 bleeds health); in-game placement editor (`editor.py`); credit economy
 (`economy.py`); difficulty strategies incl. adaptive waves
 (`packets.DIFFICULTIES`); player-designed topology (build mode); gates; parsers
-+ the `ingest` difficulty; overflow/`_spill` routing; a browser (WASM) build
-(`main.py` + pygbag); and a guided tutorial (`tutorial.py`) with a clean start.
++ the `ingest` difficulty; overflow/`_spill` routing; a native-web app (`web/`,
+Pyodide) with a sandbox (`safety.py`); and a guided tutorial (`tutorial.py`).
 
 Open next: keep growing the **training-platform** experience — a teaching coach
 that explains *why* + the fix (not just names it), in-editor Python lessons,

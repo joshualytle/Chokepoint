@@ -20,8 +20,7 @@ No `make`? Run the three directly:
 ruff check src tests && mypy src && pytest -q
 ```
 
-For the browser build, `pip install -e ".[web]"` then
-`python -m pygbag --build main.py` and `python serve_web.py`.
+For the native-web app, `python serve_native.py` (serves `web/` on :8001).
 
 ## Ground rules (please keep these true)
 

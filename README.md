@@ -25,26 +25,13 @@ A **guided, step-by-step tutorial** runs on the first launch; press **`H`** any
 time for the full controls + legend. See `SETUP.md` for details and optional
 local-LLM help. Requires Python 3.11+ and pygame 2.6+.
 
-### Play in the browser
+### Play in the browser — `web/`
 
-Chokepoint also builds to WebAssembly (via [pygbag](https://pypi.org/project/pygbag/)),
-so it runs in any modern browser — no install for players.
-
-```bash
-pip install -e ".[web]"
-python -m pygbag --build main.py      # emits build/web/
-python serve_web.py                   # serve on http://localhost:8000 (and your LAN)
-```
-
-The desktop build is unchanged (`python -m chokepoint`); the web build is an
-additional target that reuses the same code behind an async render loop.
-
-### Web-native app (recommended) — `web/`
-
-There's also a **native-web** version with a crisp HTML/canvas UI and a real code
-editor (CodeMirror). The whole Python core + your `loadout.py` run in the browser
-via [Pyodide](https://pyodide.org/); player code is **sandboxed** (`safety.py`)
-so it can't import arbitrary modules or reach the network/DOM.
+There's a **native-web** version with a crisp HTML/canvas UI and a real code
+editor (CodeMirror) — no install for players. The whole Python core + your
+`loadout.py` run in the browser via [Pyodide](https://pyodide.org/); player code
+is **sandboxed** (`safety.py`) so it can't import arbitrary modules or reach the
+network/DOM. The desktop build is unchanged (`python -m chokepoint`).
 
 ```bash
 python serve_native.py               # http://localhost:8001 (packages the core for Pyodide)
@@ -124,7 +111,7 @@ src/chokepoint/
   llm_assist.py   # optional local-LLM diagnostics (stdlib, localhost-only)
   loadout.py      # YOU EDIT THIS: place + equip turrets (and gates/limiters/parsers) in Python
   render.py       # pygame UI (the only module with pygame)
-main.py           # browser (WASM) entry point; serve_web.py serves the build
+web/              # native-web app (Pyodide + HTML/canvas); serve_native.py serves it
 tests/            # headless tests for everything but render
 ```
 

@@ -34,6 +34,8 @@ class SafetyError(ValueError):
 # modules a loadout may import (absolute paths only); everything else is rejected
 ALLOWED_IMPORTS = frozenset({
     "chokepoint.arsenal",
+    "chokepoint.gates",
+    "chokepoint.limiter",
     "chokepoint.parsers",
     "chokepoint.maps",
     "math",

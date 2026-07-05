@@ -67,10 +67,9 @@ QUEUE_WARN = QUEUE_CAP - 2  # queue depth at which a node's marker turns red
 
 
 async def main() -> None:  # pragma: no cover - needs a display
-    # pygbag (pygame -> WASM) requires an async entry point and one
-    # ``await asyncio.sleep(0)`` per frame so the browser event loop can run.
-    # ``asyncio.run(main())`` works identically on the desktop, so the same
-    # loop drives both the native and web builds.
+    # The desktop loop is async (one ``await asyncio.sleep(0)`` per frame); the
+    # ``run()`` wrapper drives it with ``asyncio.run``. (The web build is a
+    # separate native app under web/ — see serve_native.py — not this module.)
     import pygame
 
     pygame.init()

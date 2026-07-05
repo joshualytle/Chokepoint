@@ -69,6 +69,9 @@ button.gun.sel .gun-name { color: var(--phos); }
 button.gun .gun-cost { color: var(--muted); font-size: 12px; }
 button.gun .gun-kinds { color: var(--muted); font-size: 12px; }
 button.gun .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 2px; vertical-align: middle; }
+button.gun.dev.sel { background: #3a2f12; border-color: var(--gate); }
+button.gun.dev.sel .gun-name { color: var(--gate); }
+.palette-sub { flex-basis: 100%; color: var(--muted); font-size: 12px; margin-top: 2px; }
 
 button, select {
   background: var(--panel); color: var(--ink);

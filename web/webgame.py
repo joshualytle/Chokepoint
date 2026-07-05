@@ -50,6 +50,7 @@ def new_game(map_name: str = "trunk", difficulty: str = "easy") -> str:
     _world = World(MAPS[map_name].copy(), difficulty=difficulty)
     _world.paused = True                 # start on the wave preview; UI presses Start
     _editor = ArsenalEditor(_world.unlocked(), bank=_world.bank)
+    _undo.clear()
     return json.dumps({"ok": True, "maps": MAP_LIST, "difficulties": DIFFICULTY_LIST})
 
 
@@ -62,10 +63,47 @@ def _sync() -> None:
     _world.autoroute()
 
 
+# ---- undo: snapshot the mutable build state before each edit ----
+_undo: list[dict] = []
+_UNDO_CAP = 60
+
+
+def _state_snapshot() -> dict:
+    assert _world is not None and _editor is not None
+    return {"turrets": list(_editor.turrets), "gates": list(_editor.gates),
+            "limiters": list(_editor.limiters), "parsers": list(_world.parsers),
+            "map": _world.map.copy(), "balance": _world.bank.balance}
+
+
+def _record(pre: dict) -> None:
+    _undo.append(pre)
+    if len(_undo) > _UNDO_CAP:
+        del _undo[0]
+
+
+def _restore(snap: dict) -> None:
+    assert _world is not None and _editor is not None
+    _editor.turrets = list(snap["turrets"])
+    _editor.gates = list(snap["gates"])
+    _editor.limiters = list(snap["limiters"])
+    _world.map = snap["map"].copy()
+    _world.bank.balance = snap["balance"]
+    _world.set_parsers(list(snap["parsers"]))
+    _rebind_after_topology()
+
+
+def undo() -> str:
+    if not _undo:
+        return json.dumps({"ok": False})
+    _restore(_undo.pop())
+    return json.dumps({"ok": True, "depth": len(_undo)})
+
+
 def load_loadout(src: str) -> str:
     """Exec the player's build_loadout (sandboxed) and deploy what it returns."""
     global _editor
     assert _world is not None
+    pre = _state_snapshot()
     try:
         ns = safe_exec(src, _LOADOUT_API)   # sandboxed: no arbitrary imports / escapes
         if "build_loadout" not in ns:
@@ -92,6 +130,7 @@ def load_loadout(src: str) -> str:
             if _world.bank.spend(ps.cost):
                 parsers.append(ps)
     _world.set_parsers(parsers)
+    _record(pre)
     _sync()
     return json.dumps({"ok": True, "turrets": len(turrets) - len(dropped),
                        "dropped": len(dropped)})
@@ -144,6 +183,7 @@ def select_device(kind: str) -> str:
 def place_at(x: float, y: float) -> str:
     assert _editor is not None and _world is not None
     bank = _world.bank
+    pre = _state_snapshot()
     if _editor.placing_gate:
         if not _world.map.branching_nodes():
             return json.dumps({"ok": False,
@@ -151,6 +191,8 @@ def place_at(x: float, y: float) -> str:
         if not bank.can_afford(DEFAULT_GATE_COST):
             return json.dumps({"ok": False, "reason": f"need {DEFAULT_GATE_COST}cr for a gate"})
         g = _editor.place_gate(x, y)
+        if g is not None:
+            _record(pre)
         _sync()
         return json.dumps({"ok": g is not None, "reason": "" if g else "place it near a fork"})
     if _editor.placing_limiter:
@@ -158,6 +200,8 @@ def place_at(x: float, y: float) -> str:
             return json.dumps({"ok": False,
                                "reason": f"need {DEFAULT_LIMITER_COST}cr for a limiter"})
         lm = _editor.place_limiter(x, y)
+        if lm is not None:
+            _record(pre)
         _sync()
         return json.dumps({"ok": lm is not None, "reason": "" if lm else "click a node"})
     if _editor.selected_gun is None:
@@ -167,6 +211,8 @@ def place_at(x: float, y: float) -> str:
         return json.dumps({"ok": False,
                            "reason": f"need {gun.cost}cr for {gun.name} (you have {bank.balance})"})
     turret = _editor.place(x, y)
+    if turret is not None:
+        _record(pre)
     _sync()
     return json.dumps({"ok": turret is not None,
                        "reason": "" if turret else "click on a node (the circles on the line)"})
@@ -174,7 +220,10 @@ def place_at(x: float, y: float) -> str:
 
 def remove_at(x: float, y: float) -> str:
     assert _editor is not None
+    pre = _state_snapshot()
     ok = _editor.remove_at(x, y) or _editor.remove_gate_at(x, y) or _editor.remove_limiter_at(x, y)
+    if ok:
+        _record(pre)
     _sync()
     return json.dumps({"ok": ok})
 
@@ -217,6 +266,7 @@ def edge_at(x: float, y: float, tol: float = 9.0) -> str:
 
 def add_node(x: float, y: float) -> str:
     assert _world is not None
+    _record(_state_snapshot())
     _world.map.add_node(x, y)
     _rebind_after_topology()
     return json.dumps({"ok": True})
@@ -224,21 +274,30 @@ def add_node(x: float, y: float) -> str:
 
 def add_edge(a: str, b: str) -> str:
     assert _world is not None
+    pre = _state_snapshot()
     ok = _world.map.add_edge(a, b)
+    if ok:
+        _record(pre)
     _rebind_after_topology()
     return json.dumps({"ok": ok})
 
 
 def remove_node(nid: str) -> str:
     assert _world is not None
+    pre = _state_snapshot()
     ok = _world.map.remove_node(nid)
+    if ok:
+        _record(pre)
     _rebind_after_topology()
     return json.dumps({"ok": ok})
 
 
 def remove_edge(a: str, b: str) -> str:
     assert _world is not None
+    pre = _state_snapshot()
     ok = _world.map.remove_edge(a, b)
+    if ok:
+        _record(pre)
     _rebind_after_topology()
     return json.dumps({"ok": ok})
 
@@ -328,7 +387,7 @@ def snapshot() -> dict:
         "leaks": w.leaks, "max_leaks": MAX_LEAK, "credits": w.bank.balance,
         "coverage_gaps": gaps, "over": w.over, "won": w.won, "paused": w.paused,
         "started": w.started, "upcoming": upcoming, "coach": coach, "debrief": debrief,
-        "unlocked": sorted(w.unlocked()),
+        "unlocked": sorted(w.unlocked()), "can_undo": len(_undo) > 0,
         "nodes": nodes, "edges": edges, "packets": packets,
         "turrets": turrets, "gates": gates, "limiters": limiters, "parsers": parsers,
         "stats": stats,

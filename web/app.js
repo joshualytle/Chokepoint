@@ -81,6 +81,7 @@ async function boot() {
     lessons_start: pyodide.globals.get("lessons_start"),
     grant_sandbox_credits: pyodide.globals.get("grant_sandbox_credits"),
     metrics_json: pyodide.globals.get("metrics_json"),
+    undo: pyodide.globals.get("undo"),
   };
 
   const fresh = localStorage.getItem(SK("ver")) === SAVE_VERSION;   // ignore pre-clean-start saves
@@ -221,6 +222,15 @@ function eventToWorld(e) {
           (e.clientY - r.top) * (CH / r.height) - OFFY];
 }
 
+function inEditor() {
+  const a = document.activeElement;
+  return a && a.closest && a.closest(".CodeMirror");   // let CodeMirror keep its own Ctrl+Z
+}
+function doUndo() {
+  if (JSON.parse(G.undo()).ok) { refreshPalette(); showPlace("undone", true); }
+  else showPlace("nothing to undo", false);
+}
+
 let placeTimer = null;
 function showPlace(msg, ok) {
   const m = el("placeMsg");
@@ -252,6 +262,10 @@ function wireUI() {
     };
   });
   el("resetBtn").onclick = newGame;
+  el("undoBtn").onclick = doUndo;
+  document.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "z" && !inEditor()) { e.preventDefault(); doUndo(); }
+  });
   el("mapSel").onchange = newGame;
   el("diffSel").onchange = newGame;
   el("runBtn").onclick = applyLoadout;   // CodeMirror handles Ctrl/Cmd-Enter + Tab
@@ -598,10 +612,17 @@ function updateHUD(s) {
 
   // wave / start prompt over the board
   const msg = el("waveMsg");
-  if (s.over) msg.textContent = s.won ? "PIPELINE HELD ✓" : "PIPELINE OVERWHELMED ✕";
-  else if (!running) {
-    const up = s.upcoming.map((u) => `${u.kind}×${u.n}`).join("  ");
-    msg.textContent = `Wave ${s.wave} ready — press Start.  incoming: ${up}`;
+  if (s.over) { msg.textContent = s.won ? "PIPELINE HELD ✓" : "PIPELINE OVERWHELMED ✕"; }
+  else if (!running && s.upcoming.length) {
+    // proactive coverage check: flag incoming kinds you can't handle yet, before they leak
+    const covered = new Set();
+    s.turrets.forEach((t) => t.accepts.forEach((k) => covered.add(k)));
+    const up = s.upcoming.map((u) => {
+      if (u.kind === "raw") return `<span style="color:var(--muted)">raw×${u.n}</span>`;
+      const ok = covered.has(u.kind);
+      return `<span style="color:${ok ? "var(--phos)" : "var(--danger)"}">${ok ? "✓" : "✗"} ${u.kind}×${u.n}</span>`;
+    }).join("  ");
+    msg.innerHTML = `Wave ${s.wave} — press Start.  incoming: ${up}`;
   } else msg.textContent = "";
 }
 

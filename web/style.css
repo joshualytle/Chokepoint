@@ -189,6 +189,18 @@ textarea#code {
   padding: 12px; min-height: 240px; font: 13px/1.5 inherit; tab-size: 4;
   outline: none;
 }
+/* responsive: stack + fluid canvas on phones/tablets, bigger touch targets */
+@media (max-width: 900px) {
+  header { flex-wrap: wrap; gap: 8px; padding: 10px 14px; }
+  main { padding: 10px; gap: 10px; }
+  .board-stack, canvas#board { width: 100%; height: auto; }
+  .side-col { min-width: 0; flex: 1 1 100%; }
+  .palette { max-width: 100%; }
+  .controls, header { row-gap: 8px; }
+  .controls button, .palette button.gun { padding: 9px 12px; }
+  .modal-box { width: 96vw; }
+}
+
 .code-status { padding: 8px 12px; border-top: 1px solid var(--grid); min-height: 20px; color: var(--muted); }
 .code-status.ok { color: var(--phos); }
 .code-status.err { color: var(--danger); }

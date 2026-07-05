@@ -16,6 +16,7 @@ let G = null;                              // Python bridge function handles
 let cm = null;                             // CodeMirror editor instance
 let running = false, over = false;
 let selectedGun = null;                    // gun chosen in the palette (click to place)
+let deviceMode = null;                     // "gate" | "limiter" placement mode
 let buildMode = false, edgeSrc = null;     // topology editing state
 let mouseW = [0, 0];                       // last mouse position in world coords
 let helpData = null;                       // {glossary, hud}
@@ -31,6 +32,8 @@ const DEFAULT_LOADOUT = `# The board starts empty (you have full credits).
 # or build in code here and Run (Ctrl+Enter). No imports needed:
 #   Turret(x, y, gun=...), make_gun("name").
 # Guns: sieve(auth,dns)  scatter(ids,firewall)  relay(dns,email)  auditor(cloudtrail) ...
+# Devices: place gate/limiter from the palette, or define build_gates(unlocked, slots),
+# build_limiters(...), build_parsers(...) returning Gate/Limiter/Parser objects.
 def build_loadout(unlocked, slots):
     # Example — uncomment to deploy two turrets:
     #   return [
@@ -58,6 +61,7 @@ async function boot() {
     snapshot_json: pyodide.globals.get("snapshot_json"),
     palette_json: pyodide.globals.get("palette_json"),
     select_gun: pyodide.globals.get("select_gun"),
+    select_device: pyodide.globals.get("select_device"),
     place_at: pyodide.globals.get("place_at"),
     remove_at: pyodide.globals.get("remove_at"),
     node_at: pyodide.globals.get("node_at"),
@@ -184,18 +188,30 @@ function importSaveCode() {
 }
 
 function refreshPalette() {
-  const items = JSON.parse(G.palette_json());
-  selectedGun = (items.find((g) => g.selected) || {}).name || null;
+  const pal = JSON.parse(G.palette_json());
+  selectedGun = (pal.guns.find((g) => g.selected) || {}).name || null;
+  deviceMode = (pal.devices.find((d) => d.selected) || {}).kind || null;
+  const gunHtml = pal.guns.map((g) => `
+    <button class="gun ${g.selected ? "sel" : ""} ${g.afford ? "" : "poor"}" data-gun="${g.name}">
+      <span class="gun-name">${g.name}</span><span class="gun-cost">${g.cost}cr</span>
+      <span class="gun-kinds">${g.accepts.map((k, i) =>
+        `<span class="sw" style="background:${rgb(g.colors[i])}"></span>${k}`).join(" ")}</span>
+    </button>`).join("");
+  const devHtml = pal.devices.map((d) => `
+    <button class="gun dev ${d.selected ? "sel" : ""} ${d.afford ? "" : "poor"}" data-dev="${d.kind}">
+      <span class="gun-name">${d.kind}</span><span class="gun-cost">${d.cost}cr</span>
+      <span class="gun-kinds">${d.desc}</span>
+    </button>`).join("");
   el("palette").innerHTML =
-    `<div class="palette-head">GUNS — tap one (tap again to deselect), then tap a node to place. Remove: right-click, or tap a turret with no gun selected.</div>` +
-    items.map((g) => `
-      <button class="gun ${g.selected ? "sel" : ""} ${g.afford ? "" : "poor"}" data-gun="${g.name}">
-        <span class="gun-name">${g.name}</span><span class="gun-cost">${g.cost}cr</span>
-        <span class="gun-kinds">${g.accepts.map((k, i) =>
-          `<span class="sw" style="background:${rgb(g.colors[i])}"></span>${k}`).join(" ")}</span>
-      </button>`).join("");
-  el("palette").querySelectorAll("button.gun").forEach((b) => {
+    `<div class="palette-head">Tap a GUN or DEVICE, then tap a node to place. Remove: right-click, or tap it with nothing selected.</div>` +
+    gunHtml +
+    `<div class="palette-sub">FLOW DEVICES — parsers are code-only (build_parsers)</div>` +
+    devHtml;
+  el("palette").querySelectorAll("button.gun[data-gun]").forEach((b) => {
     b.onclick = () => { G.select_gun(b.dataset.gun); refreshPalette(); };
+  });
+  el("palette").querySelectorAll("button.gun[data-dev]").forEach((b) => {
+    b.onclick = () => { G.select_device(b.dataset.dev); refreshPalette(); };
   });
 }
 
@@ -254,15 +270,12 @@ function wireUI() {
     mouseW = eventToWorld(e);
     const [x, y] = mouseW;
     if (buildMode) return onBuildClick(e.button, x, y);
-    if (e.button === 2) { G.remove_at(x, y); refreshPalette(); return; }  // right-click: remove
-    if (!selectedGun) {                                                   // tap empty-handed on a turret = remove
-      if (snap && snap.turrets.some((t) => (t.x - x) ** 2 + (t.y - y) ** 2 <= 16 * 16)) {
-        G.remove_at(x, y); refreshPalette(); showPlace("removed", true); return;
-      }
+    if (e.button === 2 || (!selectedGun && !deviceMode)) {               // right-click / empty-handed: remove
+      G.remove_at(x, y); refreshPalette(); return;
     }
-    const r = JSON.parse(G.place_at(x, y));                               // place
+    const r = JSON.parse(G.place_at(x, y));                               // place gun or device
     if (r.ok) { G.tutorial_signal("place"); lastTut = ""; showPlace("placed ✓", true); }
-    else showPlace(r.reason || "pick a gun in the palette first", false);
+    else showPlace(r.reason || "pick a gun or device first", false);
     refreshPalette();
   });
 }
@@ -295,7 +308,7 @@ function frame(now) {
   lastLeaks = s.leaks;
   if (over && running) { running = false; el("startBtn").textContent = "▶ Start"; }
   render(s);
-  if (selectedGun && !buildMode) drawPlacePreview(s);
+  if ((selectedGun || deviceMode) && !buildMode) drawPlacePreview(s);
   if (buildMode) drawBuildOverlay(s);
   updateHUD(s);
   renderOverlay(s);
@@ -338,6 +351,19 @@ function drawTrend(trend, maxH) {
   g.stroke();
 }
 
+function diamond(cx, cy, r) {
+  ctx.beginPath(); ctx.moveTo(cx, cy - r); ctx.lineTo(cx + r, cy);
+  ctx.lineTo(cx, cy + r); ctx.lineTo(cx - r, cy); ctx.closePath();
+}
+function hexagon(cx, cy, r) {
+  ctx.beginPath();
+  for (let i = 0; i < 6; i++) {
+    const a = Math.PI / 3 * i, x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  }
+  ctx.closePath();
+}
+
 function drawPlacePreview(s) {
   let best = null, bd = 1e9;
   for (const n of s.nodes) { const d = (n.x - mouseW[0]) ** 2 + (n.y - mouseW[1]) ** 2; if (d < bd) { bd = d; best = n; } }
@@ -367,8 +393,19 @@ function updateBoardTip(e) {
   if (!snap || buildMode) { box.classList.add("hidden"); return; }
   const [x, y] = mouseW;
   let tip = null;
-  for (const t of snap.turrets) if ((t.x - x) ** 2 + (t.y - y) ** 2 <= 16 * 16) { tip = turretTip(t); break; }
-  if (!tip) for (const n of snap.nodes) if ((n.x - x) ** 2 + (n.y - y) ** 2 <= 16 * 16) { tip = nodeTip(n); break; }
+  const near = (o) => (o.x - x) ** 2 + (o.y - y) ** 2 <= 16 * 16;
+  for (const t of snap.turrets) if (near(t)) { tip = turretTip(t); break; }
+  if (!tip) for (const g of (snap.gates || [])) if (near(g)) {
+    const rts = g.branches.map((b) => `→ ${b.to}: ${b.kinds.join(", ") || "(none)"}`).join("<br>");
+    tip = `<b>${g.id}: gate</b><br>routes kinds at the fork<br>${rts}`; break;
+  }
+  if (!tip) for (const lm of (snap.limiters || [])) if (near(lm)) {
+    tip = `<b>${lm.id}: quelimiter</b><br>release ${lm.rate}/s<br>buffered ${lm.buffered}/${lm.cap}`; break;
+  }
+  if (!tip) for (const ps of (snap.parsers || [])) if (near(ps)) {
+    tip = `<b>${ps.id}: parser</b><br>decodes raw → ${ps.handles.join(", ")}`; break;
+  }
+  if (!tip) for (const n of snap.nodes) if (near(n)) { tip = nodeTip(n); break; }
   if (!tip) { box.classList.add("hidden"); return; }
   box.innerHTML = tip;
   box.classList.remove("hidden");
@@ -492,6 +529,27 @@ function render(s) {
     ctx.strokeStyle = "#38e1b0"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sx(t.x), sy(t.y), 12, 0, 7); ctx.stroke();
     ctx.fillStyle = "#38e1b0"; ctx.font = "12px monospace"; ctx.fillText(t.id, sx(t.x) - 8, sy(t.y) - 18);
     t.colors.forEach((c, i) => { ctx.fillStyle = rgb(c); ctx.fillRect(sx(t.x) - 12 + i * 6, sy(t.y) + 14, 5, 5); });
+  }
+  // flow devices: gates (diamond @ fork), limiters (valve), parsers (hexagon)
+  for (const g of s.gates || []) {
+    const X = sx(g.x), Y = sy(g.y);
+    diamond(X, Y, 13); ctx.fillStyle = "#0b1320"; ctx.fill();
+    diamond(X, Y, 13); ctx.strokeStyle = "#f0c878"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = "#f0c878"; ctx.font = "11px monospace"; ctx.fillText(g.id, X - 8, Y - 20);
+  }
+  for (const lm of s.limiters || []) {
+    const X = sx(lm.x), Y = sy(lm.y);
+    ctx.fillStyle = "#0b1320"; ctx.fillRect(X - 9, Y - 9, 18, 18);
+    ctx.strokeStyle = "#f2c85a"; ctx.lineWidth = 2; ctx.strokeRect(X - 9, Y - 9, 18, 18);
+    ctx.beginPath(); ctx.moveTo(X, Y - 9); ctx.lineTo(X, Y + 9); ctx.stroke();
+    ctx.fillStyle = "#f2c85a"; ctx.font = "11px monospace"; ctx.fillText(lm.id, X - 8, Y - 14);
+  }
+  for (const ps of s.parsers || []) {
+    const X = sx(ps.x), Y = sy(ps.y);
+    hexagon(X, Y, 11); ctx.fillStyle = "#0b1320"; ctx.fill();
+    hexagon(X, Y, 11); ctx.strokeStyle = "#be96ff"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = "#be96ff"; ctx.font = "11px monospace"; ctx.fillText(ps.id, X - 8, Y - 16);
+    (ps.colors || []).forEach((c, i) => { ctx.fillStyle = rgb(c); ctx.fillRect(X - 12 + i * 5, Y + 13, 4, 4); });
   }
   // bottleneck callout: ring + label the most backed-up node when it's serious
   let worst = null;

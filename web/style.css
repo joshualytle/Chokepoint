@@ -201,6 +201,9 @@ textarea#code {
   .controls, header { row-gap: 8px; }
   .controls button, .palette button.gun { padding: 9px 12px; }
   .modal-box { width: 96vw; }
+  /* the tutorial card overlaps the (now short) board and blocks taps — put it in
+     the normal flow, below the board, on small screens */
+  .tutorial { position: static; left: auto; right: auto; bottom: auto; margin-top: 10px; }
 }
 
 .code-status { padding: 8px 12px; border-top: 1px solid var(--grid); min-height: 20px; color: var(--muted); }

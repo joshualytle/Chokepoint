@@ -470,13 +470,15 @@ _WEB_TUTORIAL = [
         "Under the board, click a GUN in the palette, then click a node on the line",
         "to place it. Right-click a turret to remove it."], event="place"),
     Step("Read the dashboard", [
-        "The right panel lists each type:  in / ok / leak / now",
-        "(arrived / handled / leaked / in the queue now). A ! marks an uncovered type."]),
+        "The dashboard lists each type:  in / ok / leak / now",
+        "(arrived / handled / leaked / in the queue now). A ! marks an uncovered type.",
+        "(On a phone the panels are below the board — scroll down.)"]),
     Step("Or build it in code", [
-        "On the right, edit build_loadout and click Run (Ctrl+Enter). Code and clicks",
-        "share one budget — write Python or point-and-click, your choice."], event="run"),
+        "Scroll to the code panel (right on desktop, below the board on mobile),",
+        "edit build_loadout, and press Run (or Ctrl+Enter). Code and clicks share",
+        "one budget — write Python or point-and-click, your choice."], event="run"),
     Step("Send the wave", [
-        "Press ▶ Start. Watch the board; the COACH card names the next thing to fix."],
+        "Press ▶ Start (top-left). Watch the board; the COACH names what to fix next."],
         event="start"),
     Step("You're ready", [
         "Use 🔧 Build to branch the topology — overload spills to a parallel worker.",
@@ -510,6 +512,12 @@ def tutorial_skip() -> str:
 
 def tutorial_signal(event: str) -> str:
     _tutorial.signal(event)
+    return json.dumps(_tut_state())
+
+
+def tutorial_skip_step() -> str:
+    """Force past an action step if the player is stuck (an escape hatch)."""
+    _tutorial._advance()
     return json.dumps(_tut_state())
 
 

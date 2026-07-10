@@ -77,6 +77,7 @@ async function boot() {
     tutorial_next: pyodide.globals.get("tutorial_next"),
     tutorial_skip: pyodide.globals.get("tutorial_skip"),
     tutorial_signal: pyodide.globals.get("tutorial_signal"),
+    tutorial_skip_step: pyodide.globals.get("tutorial_skip_step"),
     lessons_state: pyodide.globals.get("lessons_state"),
     lessons_next: pyodide.globals.get("lessons_next"),
     lessons_skip: pyodide.globals.get("lessons_skip"),
@@ -467,12 +468,14 @@ function renderTutorial(s) {
     <div class="tut-head"><b>${s.title}</b><span>Step ${s.i + 1}/${s.n}</span></div>
     ${s.body.map((b) => `<div>${b}</div>`).join("")}
     <div class="tut-btns">
-      <button id="tutSkip">Skip</button>
-      ${s.manual ? `<button id="tutNext" class="primary">${s.button} ▸</button>`
-                 : `<span class="tut-hint">(do the action above to continue)</span>`}
+      <button id="tutSkip">Skip tutorial</button>
+      ${s.manual
+        ? `<button id="tutNext" class="primary">${s.button} ▸</button>`
+        : `<span class="tut-hint">do the action above, or</span><button id="tutSkipStep">skip step ▸</button>`}
     </div>`;
   el("tutSkip").onclick = () => { G.tutorial_skip(); lastTut = ""; };
   if (s.manual) el("tutNext").onclick = () => { G.tutorial_next(); lastTut = ""; };
+  else el("tutSkipStep").onclick = () => { G.tutorial_skip_step(); lastTut = ""; };
 }
 
 function renderLessons(s) {

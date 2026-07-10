@@ -16,6 +16,7 @@ Pyodide.
 
 from __future__ import annotations
 
+import copy
 import json
 
 from chokepoint.arsenal import MODULE_LIBRARY, Module, Turret, make_gun
@@ -41,15 +42,17 @@ _LOADOUT_API = {
 
 _world: World | None = None
 _editor: ArsenalEditor | None = None
+_selected_module: str | None = None    # module chosen to equip on the next turret tapped
 
 
 def new_game(map_name: str = "trunk", difficulty: str = "easy") -> str:
-    global _world, _editor
+    global _world, _editor, _selected_module
     if map_name not in MAPS:
         map_name = MAP_LIST[0]
     _world = World(MAPS[map_name].copy(), difficulty=difficulty)
     _world.paused = True                 # start on the wave preview; UI presses Start
     _editor = ArsenalEditor(_world.unlocked(), bank=_world.bank)
+    _selected_module = None
     _undo.clear()
     return json.dumps({"ok": True, "maps": MAP_LIST, "difficulties": DIFFICULTY_LIST})
 
@@ -69,9 +72,10 @@ _UNDO_CAP = 60
 
 
 def _state_snapshot() -> dict:
+    # deep copies so undo also reverts in-place edits (e.g. a module attached to a gun)
     assert _world is not None and _editor is not None
-    return {"turrets": list(_editor.turrets), "gates": list(_editor.gates),
-            "limiters": list(_editor.limiters), "parsers": list(_world.parsers),
+    return {"turrets": copy.deepcopy(_editor.turrets), "gates": copy.deepcopy(_editor.gates),
+            "limiters": copy.deepcopy(_editor.limiters), "parsers": copy.deepcopy(_world.parsers),
             "map": _world.map.copy(), "balance": _world.bank.balance}
 
 
@@ -154,11 +158,20 @@ def palette_json() -> str:
          "afford": _world.bank.can_afford(DEFAULT_LIMITER_COST),
          "selected": _editor.placing_limiter},
     ]
-    return json.dumps({"guns": guns, "devices": devices})
+    modules = []
+    for name in _editor.available_modules():
+        mod = MODULE_LIBRARY[name]
+        modules.append({"name": name, "cost": mod.cost, "desc": mod.desc,
+                        "adds": [list(KINDS[k]["color"]) + [k] for k in sorted(mod.add_accepts)],
+                        "afford": _world.bank.can_afford(mod.cost),
+                        "selected": name == _selected_module})
+    return json.dumps({"guns": guns, "devices": devices, "modules": modules})
 
 
 def select_gun(name: str) -> str:
+    global _selected_module
     assert _editor is not None
+    _selected_module = None
     if name == _editor.selected_gun:      # tapping the selected gun again deselects it
         _editor.selected_gun = None
     else:
@@ -168,7 +181,9 @@ def select_gun(name: str) -> str:
 
 def select_device(kind: str) -> str:
     """Choose gate/limiter placement mode (tap again to leave it)."""
+    global _selected_module
     assert _editor is not None
+    _selected_module = None
     if kind == "gate":
         _editor.placing_gate = not _editor.placing_gate
         _editor.placing_limiter = False
@@ -180,10 +195,28 @@ def select_device(kind: str) -> str:
     return json.dumps({"gate": _editor.placing_gate, "limiter": _editor.placing_limiter})
 
 
+def select_module(name: str) -> str:
+    """Choose a module to attach to the next turret tapped (tap again to clear)."""
+    global _selected_module
+    assert _editor is not None
+    _selected_module = None if name == _selected_module else name
+    if _selected_module is not None:
+        _editor.selected_gun = None
+        _editor.placing_gate = _editor.placing_limiter = False
+    return json.dumps({"selected": _selected_module})
+
+
 def place_at(x: float, y: float) -> str:
     assert _editor is not None and _world is not None
     bank = _world.bank
     pre = _state_snapshot()
+    if _selected_module is not None:      # equip the selected module onto a turret
+        ok = _editor.equip_at(x, y, _selected_module)
+        if ok:
+            _record(pre)
+        _sync()
+        why = "" if ok else "tap a turret (can't afford, or it has that module)"
+        return json.dumps({"ok": ok, "reason": why})
     if _editor.placing_gate:
         if not _world.map.branching_nodes():
             return json.dumps({"ok": False,
@@ -356,6 +389,7 @@ def snapshot() -> dict:
     turrets = [{"x": t.x, "y": t.y, "id": t.id, "node": t.node,
                 "gun": t.gun.name, "desc": t.gun.desc, "dps": round(t.dps(), 1),
                 "accepts": sorted(t.accepts()),
+                "modules": [m.name for m in t.gun.modules],
                 "colors": [list(KINDS[k]["color"]) for k in sorted(t.accepts())]}
                for t in w.turrets]
     gates = [{"id": g.id, "x": m.pos(g.node)[0], "y": m.pos(g.node)[1], "node": g.node,

@@ -17,6 +17,7 @@ let cm = null;                             // CodeMirror editor instance
 let running = false, over = false;
 let selectedGun = null;                    // gun chosen in the palette (click to place)
 let deviceMode = null;                     // "gate" | "limiter" placement mode
+let selectedModule = null;                 // module chosen to equip on a tapped turret
 let buildMode = false, edgeSrc = null;     // topology editing state
 let mouseW = [0, 0];                       // last mouse position in world coords
 let helpData = null;                       // {glossary, hud}
@@ -62,6 +63,7 @@ async function boot() {
     palette_json: pyodide.globals.get("palette_json"),
     select_gun: pyodide.globals.get("select_gun"),
     select_device: pyodide.globals.get("select_device"),
+    select_module: pyodide.globals.get("select_module"),
     place_at: pyodide.globals.get("place_at"),
     remove_at: pyodide.globals.get("remove_at"),
     node_at: pyodide.globals.get("node_at"),
@@ -192,6 +194,7 @@ function refreshPalette() {
   const pal = JSON.parse(G.palette_json());
   selectedGun = (pal.guns.find((g) => g.selected) || {}).name || null;
   deviceMode = (pal.devices.find((d) => d.selected) || {}).kind || null;
+  selectedModule = (pal.modules.find((m) => m.selected) || {}).name || null;
   const gunHtml = pal.guns.map((g) => `
     <button class="gun ${g.selected ? "sel" : ""} ${g.afford ? "" : "poor"}" data-gun="${g.name}">
       <span class="gun-name">${g.name}</span><span class="gun-cost">${g.cost}cr</span>
@@ -203,16 +206,25 @@ function refreshPalette() {
       <span class="gun-name">${d.kind}</span><span class="gun-cost">${d.cost}cr</span>
       <span class="gun-kinds">${d.desc}</span>
     </button>`).join("");
+  const modHtml = (pal.modules || []).map((m) => `
+    <button class="gun mod ${m.selected ? "sel" : ""} ${m.afford ? "" : "poor"}" data-mod="${m.name}">
+      <span class="gun-name">${m.name}</span><span class="gun-cost">${m.cost}cr</span>
+      <span class="gun-kinds">${m.desc}</span>
+    </button>`).join("");
   el("palette").innerHTML =
     `<div class="palette-head">Tap a GUN or DEVICE, then tap a node to place. Remove: right-click, or tap it with nothing selected.</div>` +
     gunHtml +
     `<div class="palette-sub">FLOW DEVICES — parsers are code-only (build_parsers)</div>` +
-    devHtml;
+    devHtml +
+    (modHtml ? `<div class="palette-sub">MODULES — tap one, then tap a turret to equip</div>${modHtml}` : "");
   el("palette").querySelectorAll("button.gun[data-gun]").forEach((b) => {
     b.onclick = () => { G.select_gun(b.dataset.gun); refreshPalette(); };
   });
   el("palette").querySelectorAll("button.gun[data-dev]").forEach((b) => {
     b.onclick = () => { G.select_device(b.dataset.dev); refreshPalette(); };
+  });
+  el("palette").querySelectorAll("button.gun[data-mod]").forEach((b) => {
+    b.onclick = () => { G.select_module(b.dataset.mod); refreshPalette(); };
   });
 }
 
@@ -284,10 +296,10 @@ function wireUI() {
     mouseW = eventToWorld(e);
     const [x, y] = mouseW;
     if (buildMode) return onBuildClick(e.button, x, y);
-    if (e.button === 2 || (!selectedGun && !deviceMode)) {               // right-click / empty-handed: remove
+    if (e.button === 2 || (!selectedGun && !deviceMode && !selectedModule)) {  // right-click / empty: remove
       G.remove_at(x, y); refreshPalette(); return;
     }
-    const r = JSON.parse(G.place_at(x, y));                               // place gun or device
+    const r = JSON.parse(G.place_at(x, y));                               // place gun/device, or equip a module
     if (r.ok) { G.tutorial_signal("place"); lastTut = ""; showPlace("placed ✓", true); }
     else showPlace(r.reason || "pick a gun or device first", false);
     refreshPalette();
@@ -428,7 +440,8 @@ function updateBoardTip(e) {
   box.style.top = (e.clientY - r.top + 14) + "px";
 }
 function turretTip(t) {
-  return `<b>${t.id}: ${t.gun}</b><br>${t.desc}<br>accepts: ${t.accepts.join(", ")}<br>throughput ${t.dps}/s`;
+  const mods = t.modules && t.modules.length ? `<br>modules: ${t.modules.join(", ")}` : "";
+  return `<b>${t.id}: ${t.gun}</b><br>${t.desc}<br>accepts: ${t.accepts.join(", ")}<br>throughput ${t.dps}/s${mods}`;
 }
 function nodeTip(n) {
   const role = n.source ? "source" : n.sink ? "sink" : "node";

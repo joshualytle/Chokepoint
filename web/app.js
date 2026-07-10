@@ -10,6 +10,11 @@ canvas.width = CW * DPR; canvas.height = CH * DPR;
 ctx.scale(DPR, DPR);                       // crisp on hi-DPI displays
 const sx = (x) => x + OFFX, sy = (y) => y + OFFY;
 const rgb = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
+if (!CanvasRenderingContext2D.prototype.roundRect) {   // older mobile browsers
+  CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h) {
+    this.rect(x, y, w, h); return this;
+  };
+}
 
 const el = (id) => document.getElementById(id);
 let G = null;                              // Python bridge function handles
@@ -562,40 +567,95 @@ function drawBuildOverlay(s) {
 // ---------------------------------------------------------------- rendering
 function render(s) {
   ctx.clearRect(0, 0, CW, CH);
-  // edges
-  ctx.strokeStyle = "#2b4460"; ctx.lineWidth = 6; ctx.lineCap = "round";
+  // faint dot grid so the space reads as a surface, not a void
+  ctx.fillStyle = "rgba(230, 238, 246, 0.045)";
+  for (let gx = 20; gx < CW; gx += 40)
+    for (let gy = 20; gy < CH; gy += 40) ctx.fillRect(gx, gy, 1.5, 1.5);
+
+  // edges: dark rail + lighter core (reads as a pipe)
+  ctx.lineCap = "round";
   for (const e of s.edges) {
+    ctx.strokeStyle = "#1d3049"; ctx.lineWidth = 8;
+    ctx.beginPath(); ctx.moveTo(sx(e.ax), sy(e.ay)); ctx.lineTo(sx(e.bx), sy(e.by)); ctx.stroke();
+    ctx.strokeStyle = "#33506e"; ctx.lineWidth = 2.5;
     ctx.beginPath(); ctx.moveTo(sx(e.ax), sy(e.ay)); ctx.lineTo(sx(e.bx), sy(e.by)); ctx.stroke();
     // direction arrow at 65%
     const t = 0.65, mx = e.ax + (e.bx - e.ax) * t, my = e.ay + (e.by - e.ay) * t;
     const ang = Math.atan2(e.by - e.ay, e.bx - e.ax);
-    ctx.fillStyle = "#46647d";
+    ctx.fillStyle = "#5a7c9d";
     ctx.beginPath();
     ctx.moveTo(sx(mx) + Math.cos(ang) * 7, sy(my) + Math.sin(ang) * 7);
     ctx.lineTo(sx(mx) + Math.cos(ang + 2.6) * 7, sy(my) + Math.sin(ang + 2.6) * 7);
     ctx.lineTo(sx(mx) + Math.cos(ang - 2.6) * 7, sy(my) + Math.sin(ang - 2.6) * 7);
     ctx.closePath(); ctx.fill();
   }
-  // nodes
+
+  // turret tethers UNDER nodes/turrets: show exactly which node each turret serves
+  const nodeById = {};
+  for (const n of s.nodes) nodeById[n.id] = n;
+  for (const t of s.turrets) {
+    const n = nodeById[t.node];
+    if (!n) continue;
+    ctx.strokeStyle = "rgba(56, 225, 176, 0.4)"; ctx.lineWidth = 1.5; ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(sx(t.x), sy(t.y)); ctx.lineTo(sx(n.x), sy(n.y)); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // nodes: load halo + core + queue badge; source/sink get labeled markers
   for (const n of s.nodes) {
     const frac = Math.min(n.queue, 8) / 8;
     const col = frac < 0.34 ? "#38e1b0" : frac < 0.67 ? "#f2c85a" : "#e5556e";
-    if (n.sink) { ctx.fillStyle = "#e5556e"; ctx.fillRect(sx(n.x) - 4, sy(n.y) - 18, 7, 36); }
+    if (n.queue) {                        // translucent halo scales with queue depth
+      ctx.globalAlpha = 0.22;
+      ctx.fillStyle = col;
+      ctx.beginPath(); ctx.arc(sx(n.x), sy(n.y), 8 + Math.min(n.queue, 10) * 1.6, 0, 7); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    ctx.fillStyle = "#0b1320";
+    ctx.beginPath(); ctx.arc(sx(n.x), sy(n.y), 7, 0, 7); ctx.fill();
+    ctx.strokeStyle = col; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(sx(n.x), sy(n.y), 7, 0, 7); ctx.stroke();
     ctx.fillStyle = col;
-    ctx.beginPath(); ctx.arc(sx(n.x), sy(n.y), 5 + Math.min(n.queue, 8), 0, 7); ctx.fill();
-    if (n.queue) { ctx.fillStyle = col; ctx.font = "12px monospace"; ctx.fillText(n.queue, sx(n.x) + 10, sy(n.y) - 8); }
+    ctx.beginPath(); ctx.arc(sx(n.x), sy(n.y), 2.5, 0, 7); ctx.fill();
+    if (n.source) {
+      ctx.fillStyle = "#8fa3b6"; ctx.font = "bold 11px monospace";
+      ctx.fillText("IN ▶", sx(n.x) - 14, sy(n.y) - 14);
+    }
+    if (n.sink) {
+      ctx.fillStyle = "rgba(229, 85, 110, 0.25)"; ctx.fillRect(sx(n.x) - 3, sy(n.y) - 22, 12, 44);
+      ctx.fillStyle = "#e5556e"; ctx.fillRect(sx(n.x) + 6, sy(n.y) - 22, 3, 44);
+      ctx.font = "bold 11px monospace"; ctx.fillText("EXIT", sx(n.x) - 10, sy(n.y) + 36);
+    }
+    if (n.queue) {                        // queue-count badge
+      const label = String(n.queue), w = 10 + label.length * 7;
+      ctx.fillStyle = "rgba(11, 19, 32, 0.9)";
+      ctx.beginPath(); ctx.roundRect(sx(n.x) + 10, sy(n.y) - 20, w, 15, 7); ctx.fill();
+      ctx.strokeStyle = col; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.roundRect(sx(n.x) + 10, sy(n.y) - 20, w, 15, 7); ctx.stroke();
+      ctx.fillStyle = col; ctx.font = "11px monospace";
+      ctx.fillText(label, sx(n.x) + 15, sy(n.y) - 9);
+    }
   }
-  // packets
+
+  // packets: soft glow + bright core, so traffic is alive and readable
   for (const p of s.packets) {
+    ctx.globalAlpha = 0.3;
     ctx.fillStyle = rgb(p.color);
-    ctx.beginPath(); ctx.arc(sx(p.x), sy(p.y), 4, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(sx(p.x), sy(p.y), 7.5, 0, 7); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.beginPath(); ctx.arc(sx(p.x), sy(p.y), 3.5, 0, 7); ctx.fill();
   }
+
   // turrets
   for (const t of s.turrets) {
-    ctx.fillStyle = "#0b1320"; ctx.beginPath(); ctx.arc(sx(t.x), sy(t.y), 12, 0, 7); ctx.fill();
-    ctx.strokeStyle = "#38e1b0"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(sx(t.x), sy(t.y), 12, 0, 7); ctx.stroke();
-    ctx.fillStyle = "#38e1b0"; ctx.font = "12px monospace"; ctx.fillText(t.id, sx(t.x) - 8, sy(t.y) - 18);
-    t.colors.forEach((c, i) => { ctx.fillStyle = rgb(c); ctx.fillRect(sx(t.x) - 12 + i * 6, sy(t.y) + 14, 5, 5); });
+    ctx.fillStyle = "#0d1826"; ctx.beginPath(); ctx.arc(sx(t.x), sy(t.y), 12, 0, 7); ctx.fill();
+    ctx.strokeStyle = "#38e1b0"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(sx(t.x), sy(t.y), 12, 0, 7); ctx.stroke();
+    ctx.strokeStyle = "rgba(56, 225, 176, 0.25)";
+    ctx.beginPath(); ctx.arc(sx(t.x), sy(t.y), 15, 0, 7); ctx.stroke();
+    ctx.fillStyle = "#38e1b0"; ctx.font = "bold 11px monospace";
+    ctx.fillText(t.id, sx(t.x) - 8, sy(t.y) - 19);
+    t.colors.forEach((c, i) => { ctx.fillStyle = rgb(c); ctx.fillRect(sx(t.x) - 12 + i * 6, sy(t.y) + 17, 5, 5); });
   }
   // flow devices: gates (diamond @ fork), limiters (valve), parsers (hexagon)
   for (const g of s.gates || []) {
@@ -646,19 +706,24 @@ function updateHUD(s) {
       <td>${v.in}</td><td>${v.ok}</td><td>${v.leak}</td><td>${v.now}</td></tr>`;
   }
 
+  const leakCol = s.leaks >= s.max_leaks - 3 ? "var(--danger)" : "var(--ink)";
   el("hud").innerHTML = `
-    <div class="row">
-      <span class="stat">wave <b>${s.wave}</b></span>
-      <span class="stat hoverable" title="Alerts lost (unhandled at the exit, or overflowed a full queue). Hit the cap and the run ends.">leaks <b>${s.leaks}/${s.max_leaks}</b></span>
-      <span class="stat hoverable" title="Your budget. Grows each wave; spend on turrets, removing refunds.">cr <b>${s.credits}</b></span>
+    <div class="stats">
+      <div class="stat"><span>wave</span><b>${s.wave}</b></div>
+      <div class="stat hoverable" title="Your latency budget. Alerts queued too long drain it; at 0 the pipeline goes down.">
+        <span>health</span><b style="color:${hpCol}">${s.health}</b>
+        <span class="bar"><i style="width:${hpFrac * 100}%;background:${hpCol}"></i></span>
+      </div>
+      <div class="stat hoverable" title="Alerts lost (unhandled at the exit, or overflowed a full queue). Hit the cap and the run ends.">
+        <span>leaks</span><b style="color:${leakCol}">${s.leaks}<small style="color:var(--muted)">/${s.max_leaks}</small></b>
+      </div>
+      <div class="stat hoverable" title="Your budget. Grows each wave; spend on turrets, removing refunds.">
+        <span>credits</span><b style="color:var(--phos)">${s.credits}</b>
+      </div>
     </div>
-    <div class="row" style="margin-top:6px">
-      <span class="stat hoverable" title="Your latency budget. Alerts queued too long drain it; at 0 the pipeline goes down.">health <b style="color:${hpCol}">${s.health}</b></span>
-      <span class="bar"><i style="width:${hpFrac * 100}%;background:${hpCol}"></i></span>
-    </div>
-    <div class="row" style="margin-top:6px">${cov}</div>
+    <div class="cov">${cov}</div>
     <table class="kinds">
-      <tr><th>KIND</th><th>in</th><th>ok</th><th>leak</th><th>now</th></tr>
+      <tr><th>kind</th><th>in</th><th>ok</th><th>leak</th><th>now</th></tr>
       ${rows || `<tr><td colspan="5" style="color:var(--muted)">no traffic yet</td></tr>`}
     </table>
     ${coachHtml(s)}`;

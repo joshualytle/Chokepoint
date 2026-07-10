@@ -39,6 +39,7 @@
         <div class="ctl-group">
           <button id="undoBtn" title="Undo the last placement or build edit (Ctrl+Z)">↶ Undo</button>
           <button id="buildBtn" title="Edit the topology: add nodes and edges">🔧 Build</button>
+          <button id="learnBtn" title="Guided walkthroughs: spill, gates, parsers, modules">🎓 Learn</button>
           <button id="metricsBtn" title="Run telemetry: per-kind and per-node stats">📊 Metrics</button>
           <button id="helpBtn" title="Glossary of concepts">❔ Help</button>
           <button id="resetBtn" title="Reset the run">Reset</button>
@@ -87,6 +88,13 @@
     <div class="modal-box">
       <div class="modal-head"><span>Metrics — run telemetry</span><button id="metricsClose">✕</button></div>
       <div id="metricsBody"></div>
+    </div>
+  </div>
+
+  <div id="walkthroughs" class="modal hidden">
+    <div class="modal-box">
+      <div class="modal-head"><span>Walkthroughs — guided, hands-on</span><button id="wtClose">✕</button></div>
+      <div id="wtBody"></div>
     </div>
   </div>
 

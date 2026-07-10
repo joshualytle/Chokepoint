@@ -92,6 +92,8 @@ async function boot() {
     grant_sandbox_credits: pyodide.globals.get("grant_sandbox_credits"),
     metrics_json: pyodide.globals.get("metrics_json"),
     undo: pyodide.globals.get("undo"),
+    walkthroughs_json: pyodide.globals.get("walkthroughs_json"),
+    start_walkthrough: pyodide.globals.get("start_walkthrough"),
   };
 
   const fresh = localStorage.getItem(SK("ver")) === SAVE_VERSION;   // ignore pre-clean-start saves
@@ -107,6 +109,12 @@ async function boot() {
     indentUnit: 4, matchBrackets: true, autofocus: false,
     extraKeys: { "Ctrl-Enter": applyLoadout, "Cmd-Enter": applyLoadout },
   });
+  let hlTimer = null;                      // re-highlight TODOs as the code changes
+  cm.on("change", () => {
+    clearTimeout(hlTimer);
+    hlTimer = setTimeout(() => { highlightTodos(); }, 300);
+  });
+  highlightTodos();
   applyLoadout();
   refreshPalette();
   helpData = JSON.parse(G.help_json());
@@ -142,9 +150,12 @@ function applyLoadout() {
   if (res.ok) {
     s.textContent = `deployed ${res.turrets} turret(s)` + (res.dropped ? ` (${res.dropped} over budget)` : "");
     s.className = "code-status ok";
-  } else { s.textContent = res.error; s.className = "code-status err"; }
+    clearErrLine();
+  } else {
+    s.textContent = res.error; s.className = "code-status err";
+    markErrorLine(res.line);               // jump the editor to the offending line
+  }
   refreshPalette();
-  G.tutorial_signal("run"); lastTut = ""; lastLes = "";
   autoSave();
 }
 
@@ -198,8 +209,10 @@ function importSaveCode() {
   setStatus("loaded save-code — review the code, then click Run", true);
 }
 
+let lastPal = null;                        // cached palette (coach "show me" targeting)
 function refreshPalette() {
   const pal = JSON.parse(G.palette_json());
+  lastPal = pal;
   selectedGun = (pal.guns.find((g) => g.selected) || {}).name || null;
   deviceMode = (pal.devices.find((d) => d.selected) || {}).kind || null;
   selectedModule = (pal.modules.find((m) => m.selected) || {}).name || null;
@@ -247,6 +260,31 @@ function inEditor() {
   return a && a.closest && a.closest(".CodeMirror");   // let CodeMirror keep its own Ctrl+Z
 }
 
+// ---- targeted code highlighting: TODO task lines + the line an error points at ----
+let errLine = null, todoLines = [];
+function markErrorLine(line) {
+  clearErrLine();
+  if (!line || !cm) return;
+  errLine = line - 1;
+  cm.addLineClass(errLine, "background", "cm-error-line");
+  cm.scrollIntoView({ line: errLine, ch: 0 }, 60);
+}
+function clearErrLine() {
+  if (errLine !== null && cm) cm.removeLineClass(errLine, "background", "cm-error-line");
+  errLine = null;
+}
+function highlightTodos() {
+  if (!cm) return;
+  todoLines.forEach((l) => cm.removeLineClass(l, "background", "cm-todo-line"));
+  todoLines = [];
+  for (let l = 0; l < cm.lineCount(); l++) {
+    if (/#\s*TODO/i.test(cm.getLine(l))) {
+      cm.addLineClass(l, "background", "cm-todo-line");
+      todoLines.push(l);
+    }
+  }
+}
+
 function itemNear(x, y) {
   if (!snap) return false;
   const near = (o) => (o.x - x) ** 2 + (o.y - y) ** 2 <= 18 * 18;
@@ -279,13 +317,27 @@ function wireUI() {
   el("startBtn").onclick = () => {
     if (over) return;
     running = !running;
-    if (running) { G.begin(); el("startBtn").textContent = "❚❚ Pause"; G.tutorial_signal("start"); lastTut = ""; }
+    if (running) { G.begin(); el("startBtn").textContent = "❚❚ Pause"; }
     else { G.set_paused(true); el("startBtn").textContent = "▶ Start"; }
   };
   el("helpBtn").onclick = () => el("glossary").classList.toggle("hidden");
   el("glossClose").onclick = () => el("glossary").classList.add("hidden");
   el("metricsBtn").onclick = () => { el("metrics").classList.toggle("hidden"); renderMetrics(); };
   el("metricsClose").onclick = () => el("metrics").classList.add("hidden");
+  el("learnBtn").onclick = () => { el("walkthroughs").classList.toggle("hidden"); renderWalkthroughs(); };
+  el("wtClose").onclick = () => el("walkthroughs").classList.add("hidden");
+  // coach "show me": pulse the palette card / editor the fix refers to
+  el("hud").addEventListener("click", (e) => {
+    const b = e.target.closest(".coach-show");
+    if (!b) return;
+    if (b.dataset.editor) {
+      const ed = document.querySelector(".editor-wrap");
+      ed.scrollIntoView({ behavior: "smooth", block: "center" }); pulse(ed);
+      return;
+    }
+    const t = document.querySelector(b.dataset.sel);
+    if (t) { t.scrollIntoView({ behavior: "smooth", block: "center" }); pulse(t); }
+  });
   el("copyBtn").onclick = exportSaveCode;
   el("loadBtn").onclick = importSaveCode;
   el("stepBtn").onclick = () => { if (!over) G.step(1 / 60); };
@@ -329,7 +381,7 @@ function wireUI() {
     if (e.button === 2) { G.remove_at(x, y); refreshPalette(); return; }  // right-click: remove
     if (selectedGun || deviceMode || selectedModule) {                   // place a gun/device or equip
       const r = JSON.parse(G.place_at(x, y));
-      if (r.ok) { G.tutorial_signal("place"); lastTut = ""; showPlace("placed ✓", true); }
+      if (r.ok) showPlace("placed ✓", true);
       else showPlace(r.reason || "pick a gun or device first", false);
       refreshPalette();
       return;
@@ -502,12 +554,37 @@ function tickPanels() {
   if (lj !== lastLes) { lastLes = lj; renderLessons(JSON.parse(lj)); }
 }
 
+function renderWalkthroughs() {
+  const list = JSON.parse(G.walkthroughs_json());
+  el("wtBody").innerHTML =
+    `<div class="wt-intro">Short, hands-on guides. Each step waits for you to actually do it.</div>` +
+    list.map((w) => `
+      <div class="wt-item">
+        <b>${w.title}</b><span>${w.desc} <em>(${w.n} steps)</em></span>
+        <button class="primary wt-start" data-wt="${w.id}">${w.active ? "Restart" : "Start"}</button>
+      </div>`).join("");
+  el("wtBody").querySelectorAll(".wt-start").forEach((b) => {
+    b.onclick = () => {
+      G.start_walkthrough(b.dataset.wt);
+      el("walkthroughs").classList.add("hidden");
+      lastTut = "";
+    };
+  });
+}
+
+function pulse(elm) {
+  elm.classList.remove("pulse");
+  void elm.offsetWidth;                   // restart the animation
+  elm.classList.add("pulse");
+  setTimeout(() => elm.classList.remove("pulse"), 2000);
+}
+
 function renderTutorial(s) {
   const box = el("tutorial");
   if (!s.active) { box.classList.add("hidden"); return; }
   box.classList.remove("hidden");
   box.innerHTML = `
-    <div class="tut-head"><b>${s.title}</b><span>Step ${s.i + 1}/${s.n}</span></div>
+    <div class="tut-head"><b>${s.title}</b><span>${s.name ? s.name + " · " : ""}Step ${s.i + 1}/${s.n}</span></div>
     ${s.body.map((b) => `<div>${b}</div>`).join("")}
     <div class="tut-btns">
       <button id="tutSkip">Skip tutorial</button>
@@ -744,16 +821,36 @@ function updateHUD(s) {
   } else msg.textContent = "";
 }
 
+// map a coach fix to the UI element that carries it out ("show me")
+function findCoachTarget(fix) {
+  if (!fix || !lastPal) return null;
+  for (const g of lastPal.guns)
+    if (new RegExp(`\\b${g.name}\\b`).test(fix)) return { sel: `[data-gun="${g.name}"]` };
+  for (const m of (lastPal.modules || []))
+    if (fix.includes(`'${m.name}'`) || fix.includes(m.name)) return { sel: `[data-mod="${m.name}"]` };
+  if (/quelimiter|limiter/i.test(fix)) return { sel: `[data-dev="limiter"]` };
+  if (/\bgate\b/i.test(fix)) return { sel: `[data-dev="gate"]` };
+  if (/parser|build_parsers|loadout\.py/i.test(fix)) return { editor: true };
+  return null;
+}
+
 function coachHtml(s) {
   if (!s.coach || !s.coach.length) return "";
   const h = s.coach[0];
   const lc = { danger: "var(--danger)", warn: "var(--amber)", tip: "var(--phos)", ok: "var(--phos)" }[h.level] || "var(--ink)";
   if (h.level === "ok") return `<div class="coach ok">COACH: ${h.text}</div>`;
+  const target = findCoachTarget(h.fix);
+  const showBtn = target
+    ? `<button class="coach-show" ${target.editor ? 'data-editor="1"' : `data-sel='${target.sel}'`}>⌖ show me</button>`
+    : "";
   return `<div class="coach" style="border-color:${lc}">
     <div class="coach-head" style="color:${lc}">COACH ▸ ${h.text}</div>
     ${h.why ? `<div class="coach-line"><b>WHY</b> ${h.why}</div>` : ""}
     ${h.fix ? `<div class="coach-line coach-fix"><b>FIX</b> ${h.fix}</div>` : ""}
-    ${h.concept ? `<div class="coach-concept">concept: ${h.concept}</div>` : ""}
+    <div class="coach-foot">
+      ${h.concept ? `<span class="coach-concept">concept: ${h.concept}</span>` : "<span></span>"}
+      ${showBtn}
+    </div>
   </div>`;
 }
 

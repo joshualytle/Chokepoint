@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import copy
 import json
+import traceback
 
 from chokepoint.arsenal import MODULE_LIBRARY, Module, Turret, make_gun
 from chokepoint.editor import ArsenalEditor
@@ -54,6 +55,8 @@ def new_game(map_name: str = "trunk", difficulty: str = "easy") -> str:
     _editor = ArsenalEditor(_world.unlocked(), bank=_world.bank)
     _selected_module = None
     _undo.clear()
+    if difficulty == "ingest":
+        _tutorial.signal("ingest")       # the ingest walkthrough waits for this switch
     return json.dumps({"ok": True, "maps": MAP_LIST, "difficulties": DIFFICULTY_LIST})
 
 
@@ -114,9 +117,15 @@ def load_loadout(src: str) -> str:
             raise ValueError("define build_loadout(unlocked, slots)")
         turrets = ns["build_loadout"](_world.unlocked(), _world.map.slots)
     except SafetyError as err:
-        return json.dumps({"ok": False, "error": f"blocked: {err}"})
+        # a syntax error inside the sandbox check carries the offending line
+        line = getattr(err.__cause__, "lineno", None)
+        return json.dumps({"ok": False, "error": f"blocked: {err}", "line": line})
     except Exception as err:  # report author errors to the editor, never crash
-        return json.dumps({"ok": False, "error": f"{type(err).__name__}: {err}"})
+        line = None
+        for fr in traceback.extract_tb(err.__traceback__):
+            if fr.filename == "<loadout>":
+                line = fr.lineno          # deepest frame in the player's code
+        return json.dumps({"ok": False, "error": f"{type(err).__name__}: {err}", "line": line})
     _editor = ArsenalEditor(_world.unlocked(), bank=_world.bank)
     dropped = _editor.seed_purchase(turrets)
     # optional device builders (gates / limiters / parsers), like the desktop loadout
@@ -136,6 +145,7 @@ def load_loadout(src: str) -> str:
     _world.set_parsers(parsers)
     _record(pre)
     _sync()
+    _tutorial.signal("run")
     return json.dumps({"ok": True, "turrets": len(turrets) - len(dropped),
                        "dropped": len(dropped)})
 
@@ -214,6 +224,7 @@ def place_at(x: float, y: float) -> str:
         ok = _editor.equip_at(x, y, _selected_module)
         if ok:
             _record(pre)
+            _tutorial.signal("module")
         _sync()
         why = "" if ok else "tap a turret (can't afford, or it has that module)"
         return json.dumps({"ok": ok, "reason": why})
@@ -226,6 +237,7 @@ def place_at(x: float, y: float) -> str:
         g = _editor.place_gate(x, y)
         if g is not None:
             _record(pre)
+            _tutorial.signal("gate")
         _sync()
         return json.dumps({"ok": g is not None, "reason": "" if g else "place it near a fork"})
     if _editor.placing_limiter:
@@ -235,6 +247,7 @@ def place_at(x: float, y: float) -> str:
         lm = _editor.place_limiter(x, y)
         if lm is not None:
             _record(pre)
+            _tutorial.signal("limiter")
         _sync()
         return json.dumps({"ok": lm is not None, "reason": "" if lm else "click a node"})
     if _editor.selected_gun is None:
@@ -247,6 +260,7 @@ def place_at(x: float, y: float) -> str:
     if turret is not None:
         turret.x, turret.y = _snap_to_node(x, y)   # sit on its node so it's clearly linked
         _record(pre)
+        _tutorial.signal("place")
     _sync()
     return json.dumps({"ok": turret is not None,
                        "reason": "" if turret else "click near the line"})
@@ -332,6 +346,7 @@ def add_node(x: float, y: float) -> str:
     _record(_state_snapshot())
     _world.map.add_node(x, y)
     _rebind_after_topology()
+    _tutorial.signal("node")
     return json.dumps({"ok": True})
 
 
@@ -341,6 +356,7 @@ def add_edge(a: str, b: str) -> str:
     ok = _world.map.add_edge(a, b)
     if ok:
         _record(pre)
+        _tutorial.signal("edge")
     _rebind_after_topology()
     return json.dumps({"ok": ok})
 
@@ -373,6 +389,7 @@ def set_paused(flag: bool) -> None:
 def begin() -> None:
     if _world is not None:
         _world.paused = False
+        _tutorial.signal("start")
 
 
 def step(dt: float) -> None:
@@ -515,14 +532,114 @@ _WEB_TUTORIAL = [
         "Hover any stat for help, or open ❔ Help for the glossary. Good luck!"],
         button="Start"),
 ]
+# ---- walkthrough library: themed, action-gated guides beyond the onboarding ----
+_WT_OVERFLOW = [
+    Step("Why nodes choke", [
+        "A turret drains its queue at a fixed rate. When inflow beats that rate the",
+        "queue grows, ages, and bleeds health — that's backpressure."]),
+    Step("Add a node off the line", [
+        "Press 🔧 Build, then click empty space below the trunk to add a new node."],
+        event="node"),
+    Step("Branch into it", [
+        "Still in Build: click a busy trunk node, then your new node, to draw an edge."],
+        event="edge"),
+    Step("Rejoin the line", [
+        "Now click your new node, then a LATER trunk node, so traffic can flow onward."],
+        event="edge"),
+    Step("Add a backup worker", [
+        "Leave Build mode (🔧 again). Place a turret on the branch node — one that",
+        "accepts the same kind as the overloaded worker."], event="place"),
+    Step("Spill in action", [
+        "When the primary saturates, excess alerts now SPILL down your branch to the",
+        "backup automatically — the 'else' path for a full worker. Start a wave and watch."],
+        button="Done"),
+]
+_WT_ROUTING = [
+    Step("Forks need routers", [
+        "At a fork, traffic takes the default branch unless a GATE routes it. A gate",
+        "sends each kind down the branch whose workers can handle it."]),
+    Step("Make a fork", [
+        "Press 🔧 Build and branch the line: add a node, edge in, edge back out.",
+        "(Any new edge completes this step if you already have a fork.)"], event="edge"),
+    Step("Place a gate", [
+        "Leave Build mode. Under FLOW DEVICES tap gate, then tap near the fork."],
+        event="gate"),
+    Step("Read the routes", [
+        "Hover the gold diamond: each branch lists the kinds routed down it. Routing",
+        "is derived from your turrets — it re-derives whenever your build changes."],
+        button="Done"),
+]
+_WT_INGEST = [
+    Step("Raw alerts", [
+        "Real pipelines receive RAW logs that must be parsed before anything can",
+        "consume them. The 'ingest' difficulty simulates exactly that."]),
+    Step("Switch to ingest", [
+        "Set difficulty to 'ingest' in the top controls (the run resets)."],
+        event="ingest"),
+    Step("Write a parser", [
+        "In the code editor add:",
+        "def build_parsers(unlocked, slots):",
+        "    return [Parser(*slots[0], handles={'auth', 'ids'})]",
+        "then press ▶ Run."], event="run"),
+    Step("Watch it decode", [
+        "Start the wave. Grey raw alerts hit the parser hexagon and turn into their",
+        "real kind, which your turrets can then handle. Payloads no parser handles",
+        "stay raw and leak — parse-coverage matters like consumer-coverage."],
+        button="Done"),
+]
+_WT_UPGRADES = [
+    Step("Modules upgrade guns", [
+        "Fire rate is static — you scale with MODULES: extra damage, or extra kinds",
+        "via adapter_* modules. They unlock as waves clear."]),
+    Step("Place a turret", ["Place any turret (if your board is empty)."], event="place"),
+    Step("Equip a module", [
+        "Under MODULES tap one (an adapter changes coverage), then tap your turret.",
+        "(Modules appear once unlocked — clear wave 1+, or a lesson's sandbox.)"],
+        event="module"),
+    Step("Synergies", [
+        "Some gun pairs boost each other — hover a turret to see its throughput.",
+        "Try sieve + auditor for 'Correlation' (+25% to both)."], button="Done"),
+]
+
+WALKTHROUGHS: dict[str, dict] = {
+    "basics": {"title": "The basics", "steps": _WEB_TUTORIAL,
+               "desc": "Alerts, coverage, and your first worker."},
+    "overflow": {"title": "Overload & spill", "steps": _WT_OVERFLOW,
+                 "desc": "Build a parallel branch so a full worker sheds load."},
+    "routing": {"title": "Gates & routing", "steps": _WT_ROUTING,
+                "desc": "Split traffic by type at a fork."},
+    "ingest": {"title": "Parsers & raw alerts", "steps": _WT_INGEST,
+               "desc": "Decode raw logs in code before anything can consume them."},
+    "upgrades": {"title": "Modules & synergies", "steps": _WT_UPGRADES,
+                 "desc": "Scale a worker's damage or coverage; pair guns for bonuses."},
+}
+
 _tutorial = Tutorial(_WEB_TUTORIAL)
+_tut_name = "The basics"
+
+
+def walkthroughs_json() -> str:
+    return json.dumps([{"id": wid, "title": w["title"], "desc": w["desc"],
+                        "n": len(w["steps"]),
+                        "active": _tutorial.active and _tut_name == w["title"]}
+                       for wid, w in WALKTHROUGHS.items()])
+
+
+def start_walkthrough(wid: str) -> str:
+    global _tutorial, _tut_name
+    w = WALKTHROUGHS.get(wid)
+    if w is None:
+        return json.dumps({"ok": False})
+    _tutorial = Tutorial(list(w["steps"]))
+    _tut_name = w["title"]
+    return json.dumps({"ok": True})
 
 
 def _tut_state() -> dict:
     st = _tutorial.step
     if not _tutorial.active or st is None:
         return {"active": False}
-    return {"active": True, "i": _tutorial.i, "n": len(_tutorial.script),
+    return {"active": True, "i": _tutorial.i, "n": len(_tutorial.script), "name": _tut_name,
             "title": st.title, "body": st.body, "manual": st.is_manual, "button": st.button}
 
 

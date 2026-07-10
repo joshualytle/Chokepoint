@@ -300,6 +300,34 @@ textarea#code {
 .editor-wrap .CodeMirror { border: 0; background: var(--panel2); }
 .CodeMirror-gutters { background: var(--panel2); border-right: 1px solid var(--grid-soft); }
 
+/* targeted code highlighting: lesson TODO tasks + error lines */
+.cm-todo-line { background: rgba(242, 200, 90, 0.09) !important; box-shadow: inset 3px 0 0 var(--amber); }
+.cm-error-line { background: rgba(229, 85, 110, 0.13) !important; box-shadow: inset 3px 0 0 var(--danger); }
+
+/* coach "show me" pulse on the target element */
+.pulse { animation: pulseRing 0.65s ease-in-out 3; }
+@keyframes pulseRing {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(56, 225, 176, 0); }
+  50% { box-shadow: 0 0 0 7px rgba(56, 225, 176, 0.4); }
+}
+.coach-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; gap: 8px; }
+.coach-show {
+  padding: 3px 10px; font-size: 12px; border: 1px solid var(--amber);
+  border-radius: 6px; color: var(--amber); background: transparent; white-space: nowrap;
+}
+.coach-show:hover { background: rgba(242, 200, 90, 0.12); }
+
+/* walkthrough picker */
+.wt-intro { padding: 12px 16px 4px; color: var(--muted); font-size: 12.5px; }
+.wt-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 16px; border-bottom: 1px solid var(--grid-soft);
+}
+.wt-item b { color: var(--phos); min-width: 165px; }
+.wt-item span { color: var(--muted); flex: 1; font-size: 12.5px; }
+.wt-item em { font-style: normal; opacity: 0.7; }
+.wt-item button { flex-shrink: 0; }
+
 /* ---------------------------------------------------------------- modals */
 .modal {
   position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(3px);

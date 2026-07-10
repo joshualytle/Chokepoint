@@ -245,10 +245,40 @@ def place_at(x: float, y: float) -> str:
                            "reason": f"need {gun.cost}cr for {gun.name} (you have {bank.balance})"})
     turret = _editor.place(x, y)
     if turret is not None:
+        turret.x, turret.y = _snap_to_node(x, y)   # sit on its node so it's clearly linked
         _record(pre)
     _sync()
     return json.dumps({"ok": turret is not None,
-                       "reason": "" if turret else "click on a node (the circles on the line)"})
+                       "reason": "" if turret else "click near the line"})
+
+
+def _snap_to_node(x: float, y: float) -> tuple[float, float]:
+    """Snap a turret to just below its nearest node, so it visibly links to the path."""
+    assert _world is not None
+    nid = _world.map.nearest_node(x, y)
+    nx, ny = _world.map.pos(nid)
+    return nx, ny + 24
+
+
+def move_at(fx: float, fy: float, tx: float, ty: float) -> str:
+    """Drag a placed turret / gate / limiter from (fx,fy) to (tx,ty)."""
+    assert _editor is not None
+    pre = _state_snapshot()
+    t = _editor.turret_at(fx, fy)
+    if t is not None:
+        t.x, t.y = _snap_to_node(tx, ty)
+    else:
+        g = _editor.gate_at(fx, fy)
+        lm = None if g is not None else _editor.limiter_at(fx, fy)
+        if g is not None:
+            g.x, g.y = tx, ty
+        elif lm is not None:
+            lm.x, lm.y = tx, ty
+        else:
+            return json.dumps({"ok": False})
+    _record(pre)
+    _sync()
+    return json.dumps({"ok": True})
 
 
 def remove_at(x: float, y: float) -> str:

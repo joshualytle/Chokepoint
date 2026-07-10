@@ -20,6 +20,7 @@ let deviceMode = null;                     // "gate" | "limiter" placement mode
 let selectedModule = null;                 // module chosen to equip on a tapped turret
 let buildMode = false, edgeSrc = null;     // topology editing state
 let mouseW = [0, 0];                       // last mouse position in world coords
+let drag = null;                           // dragging a placed item: {fromX,fromY,curX,curY,moved}
 let helpData = null;                       // {glossary, hud}
 let lastTut = "", lastLes = "";            // panel-state caches (avoid re-rendering every frame)
 let snap = null;                           // latest snapshot (for hover tooltips)
@@ -65,6 +66,7 @@ async function boot() {
     select_device: pyodide.globals.get("select_device"),
     select_module: pyodide.globals.get("select_module"),
     place_at: pyodide.globals.get("place_at"),
+    move_at: pyodide.globals.get("move_at"),
     remove_at: pyodide.globals.get("remove_at"),
     node_at: pyodide.globals.get("node_at"),
     edge_at: pyodide.globals.get("edge_at"),
@@ -213,7 +215,7 @@ function refreshPalette() {
       <span class="gun-kinds">${m.desc}</span>
     </button>`).join("");
   el("palette").innerHTML =
-    `<div class="palette-head">Tap a GUN or DEVICE, then tap a node to place. Remove: right-click, or tap it with nothing selected.</div>` +
+    `<div class="palette-head">Tap a GUN or DEVICE, then tap the board to place (snaps to the line). Drag a placed item to move it; tap it (nothing selected) to remove.</div>` +
     gunHtml +
     `<div class="palette-sub">FLOW DEVICES — parsers are code-only (build_parsers)</div>` +
     devHtml +
@@ -238,6 +240,21 @@ function eventToWorld(e) {
 function inEditor() {
   const a = document.activeElement;
   return a && a.closest && a.closest(".CodeMirror");   // let CodeMirror keep its own Ctrl+Z
+}
+
+function itemNear(x, y) {
+  if (!snap) return false;
+  const near = (o) => (o.x - x) ** 2 + (o.y - y) ** 2 <= 18 * 18;
+  return snap.turrets.some(near) || (snap.gates || []).some(near) || (snap.limiters || []).some(near);
+}
+
+function drawDragGhost() {
+  if (!snap) return;                       // show where the dragged item will snap (nearest node)
+  let best = null, bd = 1e9;
+  for (const n of snap.nodes) { const d = (n.x - drag.curX) ** 2 + (n.y - drag.curY) ** 2; if (d < bd) { bd = d; best = n; } }
+  if (!best) return;
+  ctx.strokeStyle = "#38e1b0"; ctx.lineWidth = 2; ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.arc(sx(best.x), sy(best.y), 16, 0, 7); ctx.stroke(); ctx.setLineDash([]);
 }
 function doUndo() {
   if (JSON.parse(G.undo()).ok) { refreshPalette(); showPlace("undone", true); }
@@ -290,20 +307,39 @@ function wireUI() {
   // Pointer events unify mouse + touch; touch-action:none (CSS) stops the tap
   // from scrolling/zooming so it registers on the board (fixes mobile placement).
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
-  canvas.addEventListener("pointermove", (e) => { mouseW = eventToWorld(e); updateBoardTip(e); });
+  canvas.addEventListener("pointermove", (e) => {
+    mouseW = eventToWorld(e);
+    if (drag) {
+      [drag.curX, drag.curY] = mouseW;
+      if (Math.hypot(drag.curX - drag.fromX, drag.curY - drag.fromY) > 6) drag.moved = true;
+      el("boardTip").classList.add("hidden");
+    } else updateBoardTip(e);
+  });
   canvas.addEventListener("pointerleave", () => el("boardTip").classList.add("hidden"));
   canvas.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     mouseW = eventToWorld(e);
     const [x, y] = mouseW;
     if (buildMode) return onBuildClick(e.button, x, y);
-    if (e.button === 2 || (!selectedGun && !deviceMode && !selectedModule)) {  // right-click / empty: remove
-      G.remove_at(x, y); refreshPalette(); return;
+    if (e.button === 2) { G.remove_at(x, y); refreshPalette(); return; }  // right-click: remove
+    if (selectedGun || deviceMode || selectedModule) {                   // place a gun/device or equip
+      const r = JSON.parse(G.place_at(x, y));
+      if (r.ok) { G.tutorial_signal("place"); lastTut = ""; showPlace("placed ✓", true); }
+      else showPlace(r.reason || "pick a gun or device first", false);
+      refreshPalette();
+      return;
     }
-    const r = JSON.parse(G.place_at(x, y));                               // place gun/device, or equip a module
-    if (r.ok) { G.tutorial_signal("place"); lastTut = ""; showPlace("placed ✓", true); }
-    else showPlace(r.reason || "pick a gun or device first", false);
-    refreshPalette();
+    if (itemNear(x, y)) {                                                 // grab a placed item to drag
+      drag = { fromX: x, fromY: y, curX: x, curY: y, moved: false };
+      try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* older browsers */ }
+    }
+  });
+  canvas.addEventListener("pointerup", (e) => {
+    if (!drag) return;
+    const [x, y] = eventToWorld(e);
+    if (drag.moved) { G.move_at(drag.fromX, drag.fromY, x, y); showPlace("moved ✓", true); }
+    else G.remove_at(drag.fromX, drag.fromY);                            // a tap on an item removes it
+    drag = null; refreshPalette();
   });
 }
 
@@ -336,6 +372,7 @@ function frame(now) {
   if (over && running) { running = false; el("startBtn").textContent = "▶ Start"; }
   render(s);
   if ((selectedGun || deviceMode) && !buildMode) drawPlacePreview(s);
+  if (drag && drag.moved) drawDragGhost();
   if (buildMode) drawBuildOverlay(s);
   updateHUD(s);
   renderOverlay(s);

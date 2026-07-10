@@ -30,7 +30,6 @@ Issues = "https://github.com/joshualytle/Chokepoint/issues"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.11"]
-web = ["pygbag>=0.9"]   # pygame -> WebAssembly build (browser target)
 
 [project.scripts]
 chokepoint = "chokepoint.render:run"

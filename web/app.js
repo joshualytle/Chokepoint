@@ -117,6 +117,7 @@ async function boot() {
   highlightTodos();
   applyLoadout();
   refreshPalette();
+  refreshWtList();
   helpData = JSON.parse(G.help_json());
   buildGlossary();
 
@@ -170,6 +171,30 @@ function autoSave() {
     localStorage.setItem(SK("map"), el("mapSel").value);
     localStorage.setItem(SK("diff"), el("diffSel").value);
   } catch (e) { /* storage disabled/full — ignore */ }
+}
+
+// ---- walkthrough completion — persisted across sessions, apart from the build ----
+let wtDone = loadWtDone();     // Set of completed walkthrough ids
+let wtList = [];               // cached [{id,title,desc,n,active}]
+let wtNameToId = {};           // title -> id (tutorial state carries the title)
+function loadWtDone() {
+  try { return new Set(JSON.parse(localStorage.getItem(SK("wt_done")) || "[]")); }
+  catch (e) { return new Set(); }
+}
+function saveWtDone() {
+  try { localStorage.setItem(SK("wt_done"), JSON.stringify([...wtDone])); } catch (e) { /* ignore */ }
+}
+function refreshWtList() {
+  wtList = JSON.parse(G.walkthroughs_json());
+  wtNameToId = {};
+  wtList.forEach((w) => { wtNameToId[w.title] = w.id; });
+}
+function markWtDone(name) {
+  const id = wtNameToId[name];
+  if (!id || wtDone.has(id)) return;
+  wtDone.add(id); saveWtDone();
+  showPlace(`🎓 completed “${name}”`, true);
+  if (!el("walkthroughs").classList.contains("hidden")) renderWalkthroughs();
 }
 
 function setStatus(msg, ok) {
@@ -328,6 +353,12 @@ function wireUI() {
   el("wtClose").onclick = () => el("walkthroughs").classList.add("hidden");
   // coach "show me": pulse the palette card / editor the fix refers to
   el("hud").addEventListener("click", (e) => {
+    const learn = e.target.closest(".coach-learn");
+    if (learn) {
+      G.start_walkthrough(learn.dataset.wt); lastTut = "";
+      showPlace("walkthrough started — follow the card ▸", true);
+      return;
+    }
     const b = e.target.closest(".coach-show");
     if (!b) return;
     if (b.dataset.editor) {
@@ -547,22 +578,42 @@ function nodeTip(n) {
 }
 
 // ------------------------------------------------- tutorial + lessons panels
+let wtPrev = null;                          // last tutorial state, to detect completion
 function tickPanels() {
   const tj = G.tutorial_state();
-  if (tj !== lastTut) { lastTut = tj; renderTutorial(JSON.parse(tj)); }
+  if (tj !== lastTut) {
+    const t = JSON.parse(tj);
+    // completed = it was active on the FINAL step and just went inactive (not skipped early)
+    if (wtPrev && wtPrev.active && !t.active && wtPrev.i === wtPrev.n - 1) markWtDone(wtPrev.name);
+    wtPrev = t; lastTut = tj;
+    renderTutorial(t);
+  }
   const lj = G.lessons_state();
   if (lj !== lastLes) { lastLes = lj; renderLessons(JSON.parse(lj)); }
 }
 
 function renderWalkthroughs() {
-  const list = JSON.parse(G.walkthroughs_json());
+  refreshWtList();
+  const doneN = wtList.filter((w) => wtDone.has(w.id)).length;
+  const pct = wtList.length ? Math.round(doneN / wtList.length * 100) : 0;
   el("wtBody").innerHTML =
-    `<div class="wt-intro">Short, hands-on guides. Each step waits for you to actually do it.</div>` +
-    list.map((w) => `
-      <div class="wt-item">
-        <b>${w.title}</b><span>${w.desc} <em>(${w.n} steps)</em></span>
-        <button class="primary wt-start" data-wt="${w.id}">${w.active ? "Restart" : "Start"}</button>
-      </div>`).join("");
+    `<div class="wt-intro">
+       Five skills behind a real alert pipeline — coverage, backpressure, routing,
+       ingest, and scaling. Each is a short hands-on guide; every step waits for
+       you to actually do it.
+       <div class="wt-bar"><i style="width:${pct}%"></i></div>
+       <span class="wt-progress">${doneN} / ${wtList.length} complete</span>
+     </div>` +
+    wtList.map((w, idx) => {
+      const done = wtDone.has(w.id);
+      const label = w.active ? "Restart" : done ? "Replay" : "Start";
+      return `
+      <div class="wt-item ${done ? "done" : ""} ${w.active ? "active" : ""}">
+        <span class="wt-num">${done ? "✓" : idx + 1}</span>
+        <div class="wt-text"><b>${w.title}</b><span class="wt-desc">${w.desc} <em>(${w.n} steps)</em></span></div>
+        <button class="primary wt-start" data-wt="${w.id}">${label}</button>
+      </div>`;
+    }).join("");
   el("wtBody").querySelectorAll(".wt-start").forEach((b) => {
     b.onclick = () => {
       G.start_walkthrough(b.dataset.wt);
@@ -821,6 +872,17 @@ function updateHUD(s) {
   } else msg.textContent = "";
 }
 
+// map the current coach hint to the walkthrough that teaches the fix
+function findCoachWalkthrough(h) {
+  const s = `${h.text} ${h.why || ""} ${h.fix || ""} ${h.concept || ""}`.toLowerCase();
+  if (/\braw\b|parser|decode|ingest/.test(s)) return { id: "ingest", title: "Parsers & raw alerts" };
+  if (/\bgate\b|\broute|routing|\bfork/.test(s)) return { id: "routing", title: "Gates & routing" };
+  if (/spill|overflow|parallel branch|backpressure|backs? up|saturat|bottleneck|\bqueue/.test(s))
+    return { id: "overflow", title: "Overload & spill" };
+  if (/module|adapter|synerg|upgrade/.test(s)) return { id: "upgrades", title: "Modules & synergies" };
+  return null;
+}
+
 // map a coach fix to the UI element that carries it out ("show me")
 function findCoachTarget(fix) {
   if (!fix || !lastPal) return null;
@@ -843,14 +905,16 @@ function coachHtml(s) {
   const showBtn = target
     ? `<button class="coach-show" ${target.editor ? 'data-editor="1"' : `data-sel='${target.sel}'`}>⌖ show me</button>`
     : "";
+  const wt = findCoachWalkthrough(h);
+  const learnBtn = wt && !wtDone.has(wt.id)
+    ? `<button class="coach-learn" data-wt="${wt.id}">🎓 learn: ${wt.title}</button>`
+    : "";
   return `<div class="coach" style="border-color:${lc}">
     <div class="coach-head" style="color:${lc}">COACH ▸ ${h.text}</div>
     ${h.why ? `<div class="coach-line"><b>WHY</b> ${h.why}</div>` : ""}
     ${h.fix ? `<div class="coach-line coach-fix"><b>FIX</b> ${h.fix}</div>` : ""}
-    <div class="coach-foot">
-      ${h.concept ? `<span class="coach-concept">concept: ${h.concept}</span>` : "<span></span>"}
-      ${showBtn}
-    </div>
+    ${h.concept ? `<div class="coach-concept">concept: ${h.concept}</div>` : ""}
+    <div class="coach-foot">${showBtn}${learnBtn}</div>
   </div>`;
 }
 

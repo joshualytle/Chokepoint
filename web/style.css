@@ -311,22 +311,39 @@ textarea#code {
   50% { box-shadow: 0 0 0 7px rgba(56, 225, 176, 0.4); }
 }
 .coach-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; gap: 8px; }
-.coach-show {
-  padding: 3px 10px; font-size: 12px; border: 1px solid var(--amber);
-  border-radius: 6px; color: var(--amber); background: transparent; white-space: nowrap;
+.coach-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; margin-top: 6px; gap: 8px; }
+.coach-foot:empty { display: none; }
+.coach-show, .coach-learn {
+  padding: 3px 10px; font-size: 12px; border-radius: 6px;
+  background: transparent; white-space: nowrap;
 }
+.coach-show { border: 1px solid var(--amber); color: var(--amber); }
 .coach-show:hover { background: rgba(242, 200, 90, 0.12); }
+.coach-learn { border: 1px solid var(--phos); color: var(--phos); }
+.coach-learn:hover { background: rgba(56, 225, 176, 0.12); }
 
-/* walkthrough picker */
-.wt-intro { padding: 12px 16px 4px; color: var(--muted); font-size: 12.5px; }
+/* walkthrough picker / skill map */
+.wt-intro { padding: 14px 16px 10px; color: var(--muted); font-size: 12.5px; line-height: 1.6; border-bottom: 1px solid var(--grid); }
+.wt-bar { height: 6px; background: var(--grid); border-radius: 3px; overflow: hidden; margin: 10px 0 4px; }
+.wt-bar > i { display: block; height: 100%; background: var(--phos); border-radius: 3px; transition: width 0.3s; }
+.wt-progress { color: var(--phos); font-size: 12px; }
 .wt-item {
   display: flex; align-items: center; gap: 12px;
   padding: 11px 16px; border-bottom: 1px solid var(--grid-soft);
 }
-.wt-item b { color: var(--phos); min-width: 165px; }
-.wt-item span { color: var(--muted); flex: 1; font-size: 12.5px; }
-.wt-item em { font-style: normal; opacity: 0.7; }
+.wt-num {
+  flex-shrink: 0; width: 24px; height: 24px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--grid); color: var(--muted); font-size: 12px;
+}
+.wt-item.done .wt-num { background: var(--phos-dim); border-color: var(--phos); color: var(--phos); }
+.wt-item.active { background: rgba(56, 225, 176, 0.05); }
+.wt-text { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wt-text b { color: var(--phos); }
+.wt-desc { color: var(--muted); font-size: 12.5px; }
+.wt-desc em { font-style: normal; opacity: 0.7; }
 .wt-item button { flex-shrink: 0; }
+.wt-item.done button { background: transparent; border-color: var(--grid); color: var(--muted); }
 
 /* ---------------------------------------------------------------- modals */
 .modal {

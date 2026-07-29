@@ -305,6 +305,116 @@ def remove_at(x: float, y: float) -> str:
     return json.dumps({"ok": ok})
 
 
+# ---- inspector: click a board object -> its stats, its Python, and edit actions ----
+def _turret_code(t) -> str:
+    """The build_loadout Python equivalent to this placed turret (teaching aid)."""
+    if not t.gun.modules:
+        return f'Turret({int(t.x)}, {int(t.y)}, gun=make_gun("{t.gun.name}"))'
+    lines = [f'gun = make_gun("{t.gun.name}")']
+    for m in t.gun.modules:
+        lines.append(f'gun.attach(MODULE_LIBRARY["{m.name}"])')
+    lines.append(f"Turret({int(t.x)}, {int(t.y)}, gun=gun)")
+    return "\n".join(lines)
+
+
+def inspect_at(x: float, y: float) -> str:
+    """Describe the object under (x, y): identity, stats, its code, and actions."""
+    from chokepoint.arsenal import gun_cost
+    assert _editor is not None and _world is not None
+    m = _world.map
+
+    t = _editor.turret_at(x, y)
+    if t is not None:
+        guns = [{"name": n, "cost": make_gun(n).cost, "current": n == t.gun.name}
+                for n in _editor.available_guns()]
+        equipped = {mm.name for mm in t.gun.modules}
+        mods = []
+        for n in _editor.available_modules():
+            mod = MODULE_LIBRARY[n]
+            mods.append({"name": n, "cost": mod.cost, "desc": mod.desc,
+                         "equipped": n in equipped, "afford": _world.bank.can_afford(mod.cost)})
+        return json.dumps({
+            "kind": "turret", "id": t.id, "x": t.x, "y": t.y, "node": t.node,
+            "gun": t.gun.name, "desc": t.gun.desc, "dps": round(t.dps(), 1),
+            "cost": gun_cost(t.gun), "accepts": sorted(t.accepts()),
+            "colors": [list(KINDS[k]["color"]) for k in sorted(t.accepts())],
+            "modules": [mm.name for mm in t.gun.modules],
+            "code": _turret_code(t), "guns": guns, "mods": mods,
+        })
+
+    g = _editor.gate_at(x, y)
+    if g is not None:
+        node = getattr(g, "node", None)
+        branches = []
+        if node in m.nodes:
+            for bi, b in enumerate(m.branches(node)):
+                branches.append({"to": b,
+                                 "kinds": sorted(k for k, i in g.routes.items() if i == bi)})
+        return json.dumps({
+            "kind": "gate", "id": g.id, "x": g.x, "y": g.y,
+            "code": f"Gate({int(g.x)}, {int(g.y)})", "branches": branches,
+            "note": ("Routing is derived from your turrets — each kind flows down the "
+                     "branch whose consumers handle it, re-derived on every build change."),
+        })
+
+    lm = _editor.limiter_at(x, y)
+    if lm is not None:
+        return json.dumps({
+            "kind": "limiter", "id": lm.id, "x": lm.x, "y": lm.y,
+            "rate": lm.release_rate, "cap": lm.buffer_cap,
+            "code": f"Limiter({int(lm.x)}, {int(lm.y)})",
+            "note": ("Token bucket: buffers a burst (finite cap) and releases onward at "
+                     "rate/s. Smooths spikes; sustained overload still needs throughput."),
+        })
+
+    for ps in _world.parsers:                 # parsers are code-only (build_parsers)
+        if ps.node in m.nodes:
+            px, py = m.pos(ps.node)
+            if (px - x) ** 2 + (py - y) ** 2 <= 18 * 18:
+                handles = sorted(ps.handles)
+                hset = ", ".join(repr(k) for k in handles)
+                return json.dumps({
+                    "kind": "parser", "id": ps.id, "x": px, "y": py, "handles": handles,
+                    "colors": [list(KINDS[k]["color"]) for k in handles],
+                    "code": f"Parser({int(px)}, {int(py)}, handles={{{hset}}})",
+                    "note": ("Decodes raw alerts into the kinds it handles; anything it "
+                             "doesn't handle stays raw and leaks. Define in build_parsers."),
+                })
+
+    nid = node_at(x, y)                        # bare node: read-only queue/coverage info
+    if nid:
+        nx, ny = m.pos(nid)
+        served = sorted({k for tt in _world.turrets if tt.node == nid for k in tt.accepts()})
+        return json.dumps({
+            "kind": "node", "id": nid, "x": nx, "y": ny,
+            "queue": len(_world.queue_at(nid)), "served": served,
+            "source": nid == m.source, "sink": nid == m.sink,
+        })
+
+    return json.dumps({"kind": None})
+
+
+def set_gun_at(x: float, y: float, name: str) -> str:
+    assert _editor is not None
+    pre = _state_snapshot()
+    ok = _editor.swap_gun_at(x, y, name)
+    if ok:
+        _record(pre)
+    _sync()
+    return json.dumps({"ok": ok})
+
+
+def equip_module_at(x: float, y: float, name: str) -> str:
+    assert _editor is not None
+    pre = _state_snapshot()
+    ok = _editor.equip_at(x, y, name)
+    if ok:
+        _record(pre)
+        _tutorial.signal("module")
+    _sync()
+    return json.dumps({"ok": ok})
+
+
 # ---- build mode: edit the topology (add/remove nodes and edges) ----
 def _rebind_after_topology() -> None:
     """Drop only packets stranded by a removed node, then re-snap all devices."""

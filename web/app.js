@@ -73,6 +73,9 @@ async function boot() {
     place_at: pyodide.globals.get("place_at"),
     move_at: pyodide.globals.get("move_at"),
     remove_at: pyodide.globals.get("remove_at"),
+    inspect_at: pyodide.globals.get("inspect_at"),
+    set_gun_at: pyodide.globals.get("set_gun_at"),
+    equip_module_at: pyodide.globals.get("equip_module_at"),
     node_at: pyodide.globals.get("node_at"),
     edge_at: pyodide.globals.get("edge_at"),
     add_node: pyodide.globals.get("add_node"),
@@ -141,6 +144,8 @@ function newGame() {
   G.new_game(el("mapSel").value, el("diffSel").value);
   applyLoadout();
   refreshPalette();
+  closeInspector();
+  achWave = 1;
   el("startBtn").textContent = "▶ Start";
 }
 
@@ -152,6 +157,7 @@ function applyLoadout() {
     s.textContent = `deployed ${res.turrets} turret(s)` + (res.dropped ? ` (${res.dropped} over budget)` : "");
     s.className = "code-status ok";
     clearErrLine();
+    if (res.turrets > 0) unlock("coder");
   } else {
     s.textContent = res.error; s.className = "code-status err";
     markErrorLine(res.line);               // jump the editor to the offending line
@@ -194,6 +200,7 @@ function markWtDone(name) {
   if (!id || wtDone.has(id)) return;
   wtDone.add(id); saveWtDone();
   showPlace(`🎓 completed “${name}”`, true);
+  if (wtList.length && wtList.every((w) => wtDone.has(w.id))) unlock("scholar");
   if (!el("walkthroughs").classList.contains("hidden")) renderWalkthroughs();
 }
 
@@ -258,7 +265,7 @@ function refreshPalette() {
       <span class="gun-kinds">${m.desc}</span>
     </button>`).join("");
   el("palette").innerHTML =
-    `<div class="palette-head">Tap a GUN or DEVICE, then tap the board to place (snaps to the line). Drag a placed item to move it; tap it (nothing selected) to remove.</div>` +
+    `<div class="palette-head">Tap a GUN or DEVICE, then tap the board to place (snaps to the line). Tap a placed item to inspect &amp; edit its code; drag to move it.</div>` +
     gunHtml +
     `<div class="palette-sub">FLOW DEVICES — parsers are code-only (build_parsers)</div>` +
     devHtml +
@@ -351,6 +358,8 @@ function wireUI() {
   el("metricsClose").onclick = () => el("metrics").classList.add("hidden");
   el("learnBtn").onclick = () => { el("walkthroughs").classList.toggle("hidden"); renderWalkthroughs(); };
   el("wtClose").onclick = () => el("walkthroughs").classList.add("hidden");
+  el("trophyBtn").onclick = () => { el("achievements").classList.toggle("hidden"); renderAchievements(); };
+  el("achClose").onclick = () => el("achievements").classList.add("hidden");
   // coach "show me": pulse the palette card / editor the fix refers to
   el("hud").addEventListener("click", (e) => {
     const learn = e.target.closest(".coach-learn");
@@ -420,13 +429,15 @@ function wireUI() {
     if (itemNear(x, y)) {                                                 // grab a placed item to drag
       drag = { fromX: x, fromY: y, curX: x, curY: y, moved: false };
       try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* older browsers */ }
+    } else {
+      inspectAt(x, y);                                                    // tap open space / node: inspect (or clear)
     }
   });
   canvas.addEventListener("pointerup", (e) => {
     if (!drag) return;
     const [x, y] = eventToWorld(e);
-    if (drag.moved) { G.move_at(drag.fromX, drag.fromY, x, y); showPlace("moved ✓", true); }
-    else G.remove_at(drag.fromX, drag.fromY);                            // a tap on an item removes it
+    if (drag.moved) { G.move_at(drag.fromX, drag.fromY, x, y); showPlace("moved ✓", true); inspectAt(x, y); }
+    else inspectAt(drag.fromX, drag.fromY);                              // a tap on an item opens the inspector
     drag = null; refreshPalette();
   });
 }
@@ -442,7 +453,10 @@ function onBuildClick(button, x, y) {
   }
   if (!node) { G.add_node(x, y); return; }   // empty space: new node
   if (!edgeSrc) { edgeSrc = node; }          // first node of an edge
-  else { if (edgeSrc !== node) G.add_edge(edgeSrc, node); edgeSrc = null; }
+  else {
+    if (edgeSrc !== node && JSON.parse(G.add_edge(edgeSrc, node)).ok) unlock("topology");
+    edgeSrc = null;
+  }
 }
 
 function frame(now) {
@@ -461,10 +475,12 @@ function frame(now) {
   render(s);
   if ((selectedGun || deviceMode) && !buildMode) drawPlacePreview(s);
   if (drag && drag.moved) drawDragGhost();
+  if (insp && !buildMode) drawSelectionRing();
   if (buildMode) drawBuildOverlay(s);
   updateHUD(s);
   renderOverlay(s);
   tickPanels();
+  checkAchievements(s);
   frameN++;
   if (frameN % 15 === 0 && !el("metrics").classList.contains("hidden")) renderMetrics();  // live
   requestAnimationFrame(frame);
@@ -575,6 +591,172 @@ function nodeTip(n) {
   s += `<br>serves: ${n.served.length ? n.served.join(", ") : "(pass-through)"}`;
   if (n.queue) s += `<br>oldest wait ${n.oldest}s / grace ${n.grace}s${n.oldest > n.grace ? " — BLEEDING" : ""}`;
   return s;
+}
+
+// ------------------------------------------------ inspector: board <-> Python
+let insp = null;                            // last inspect result (drives panel + ring)
+function inspectAt(x, y) {
+  const r = JSON.parse(G.inspect_at(x, y));
+  if (!r.kind) { closeInspector(); return; }
+  insp = r; renderInspector(r);
+}
+function reinspect() { if (insp) inspectAt(insp.x, insp.y); }
+function closeInspector() { insp = null; el("inspector").classList.add("hidden"); }
+function drawSelectionRing() {
+  ctx.strokeStyle = "#e6eef6"; ctx.lineWidth = 2; ctx.setLineDash([2, 4]);
+  ctx.beginPath(); ctx.arc(sx(insp.x), sy(insp.y), 19, 0, 7); ctx.stroke(); ctx.setLineDash([]);
+}
+
+const KIND_ICON = { turret: "🔫", gate: "◆", limiter: "▮", parser: "⬡", node: "◉" };
+function escapeHtml(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+function escapeAttr(s) { return escapeHtml(s).replace(/"/g, "&quot;").replace(/\n/g, "&#10;"); }
+function copyText(t) { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).catch(() => {}); }
+function ichip(k, col) { return `<span class="k-chip"><i class="sw" style="background:${rgb(col)}"></i>${k}</span>`; }
+function codeBlock(code) {
+  return `<div class="insp-code">
+    <div class="insp-code-head">equivalent Python<button class="insp-copy" data-code="${escapeAttr(code)}">⧉ copy</button></div>
+    <pre>${escapeHtml(code)}</pre></div>`;
+}
+
+function renderInspector(r) {
+  const box = el("inspector");
+  box.classList.remove("hidden");
+  const bodies = { turret: turretInspector, gate: gateInspector, limiter: limiterInspector, parser: parserInspector, node: nodeInspector };
+  box.innerHTML = `
+    <div class="insp-head">
+      <span>${KIND_ICON[r.kind] || ""} ${r.id} <em>· ${r.kind}</em></span>
+      <button id="inspClose" title="Close">✕</button>
+    </div>
+    <div class="insp-body">${(bodies[r.kind] || (() => ""))(r)}</div>`;
+  el("inspClose").onclick = closeInspector;
+  wireInspector(r);
+}
+
+function turretInspector(r) {
+  const accepts = r.accepts.map((k, i) => ichip(k, r.colors[i])).join("");
+  const gunOpts = r.guns.map((g) =>
+    `<button class="insp-opt ${g.current ? "cur" : ""}" data-gun="${g.name}" ${g.current ? "disabled" : ""}>${g.name} <em>${g.cost}</em></button>`).join("");
+  const modOpts = r.mods.map((m) =>
+    `<button class="insp-opt ${m.equipped ? "cur" : ""} ${(m.afford || m.equipped) ? "" : "poor"}" data-mod="${m.name}" ${m.equipped ? "disabled" : ""} title="${escapeAttr(m.desc)}">${m.equipped ? "✓" : "+"}${m.name} <em>${m.cost}</em></button>`).join("");
+  return `
+    <div class="insp-stats">
+      <span class="insp-title"><b>${r.gun}</b> · ${r.dps}/s · ${r.cost}cr</span>
+      <div class="insp-desc">${r.desc}</div>
+      <div class="insp-chips">${accepts}</div>
+    </div>
+    ${codeBlock(r.code)}
+    <div class="insp-section">Change gun <em>(pays only the difference)</em></div>
+    <div class="insp-opts">${gunOpts}</div>
+    <div class="insp-section">Equip module</div>
+    <div class="insp-opts">${modOpts || "<span class='insp-none'>none unlocked yet — clear a wave</span>"}</div>
+    <div class="insp-actions"><button class="insp-remove">🗑 Remove <em>(refund)</em></button></div>`;
+}
+function gateInspector(r) {
+  const routes = r.branches.length
+    ? r.branches.map((b) => `<div class="insp-route">→ <b>${b.to}</b>: ${b.kinds.join(", ") || "(none)"}</div>`).join("")
+    : "<div class='insp-none'>not on a fork — drag it onto a branch point</div>";
+  return `<div class="insp-stats"><div class="insp-desc">Typed router at a fork.</div>${routes}</div>
+    ${codeBlock(r.code)}<div class="insp-note">${r.note}</div>
+    <div class="insp-actions"><button class="insp-remove">🗑 Remove <em>(refund)</em></button></div>`;
+}
+function limiterInspector(r) {
+  return `<div class="insp-stats"><span class="insp-title">release <b>${r.rate}/s</b> · buffer ${r.cap}</span></div>
+    ${codeBlock(r.code)}<div class="insp-note">${r.note}</div>
+    <div class="insp-actions"><button class="insp-remove">🗑 Remove <em>(refund)</em></button></div>`;
+}
+function parserInspector(r) {
+  const chips = r.handles.map((k, i) => ichip(k, r.colors[i])).join("");
+  return `<div class="insp-stats"><div class="insp-chips">${chips}</div></div>
+    ${codeBlock(r.code)}<div class="insp-note">${r.note}</div>
+    <div class="insp-none">Parsers are code-only — edit build_parsers to change them.</div>`;
+}
+function nodeInspector(r) {
+  const role = r.source ? "source (IN)" : r.sink ? "sink (EXIT)" : "junction";
+  return `<div class="insp-stats"><span class="insp-title">${role} · queue <b>${r.queue}</b></span>
+    <div class="insp-desc">served here: ${r.served.length ? r.served.join(", ") : "(pass-through — no consumer)"}</div></div>
+    <div class="insp-note">Drop a turret whose gun accepts a kind that piles up here. Tap a turret to see and edit its Python.</div>`;
+}
+
+function wireInspector(r) {
+  const box = el("inspector");
+  box.querySelectorAll(".insp-copy").forEach((b) => b.onclick = () => {
+    copyText(b.dataset.code.replace(/&#10;/g, "\n").replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&"));
+    b.textContent = "✓ copied"; setTimeout(() => { b.textContent = "⧉ copy"; }, 1200);
+  });
+  box.querySelectorAll("[data-gun]").forEach((b) => b.onclick = () => {
+    if (JSON.parse(G.set_gun_at(r.x, r.y, b.dataset.gun)).ok) {
+      unlock("swap_gun"); refreshPalette(); reinspect(); showPlace(`swapped to ${b.dataset.gun}`, true);
+    } else showPlace("can't afford that gun", false);
+  });
+  box.querySelectorAll("[data-mod]").forEach((b) => b.onclick = () => {
+    if (JSON.parse(G.equip_module_at(r.x, r.y, b.dataset.mod)).ok) {
+      refreshPalette(); reinspect(); showPlace(`equipped ${b.dataset.mod}`, true);
+    } else showPlace("can't equip (afford / already on)", false);
+  });
+  const rm = box.querySelector(".insp-remove");
+  if (rm) rm.onclick = () => { G.remove_at(r.x, r.y); closeInspector(); refreshPalette(); showPlace("removed (refunded)", true); };
+}
+
+// ---------------------------------------------------------------- achievements
+const ACHIEVEMENTS = [
+  { id: "first_turret", icon: "🔫", title: "First responder", desc: "Place your first turret." },
+  { id: "coder", icon: "🐍", title: "Wrote the pipeline", desc: "Deploy turrets from build_loadout code." },
+  { id: "coverage", icon: "🛡️", title: "Full coverage", desc: "Handle every kind in play — no gaps." },
+  { id: "clear_wave", icon: "🌊", title: "Wave cleared", desc: "Survive a full wave." },
+  { id: "flawless", icon: "✨", title: "Flawless", desc: "Reach wave 3 with zero leaks." },
+  { id: "use_gate", icon: "◆", title: "Traffic control", desc: "Place a gate to route by type." },
+  { id: "use_limiter", icon: "▮", title: "Backpressure", desc: "Place a quelimiter." },
+  { id: "use_parser", icon: "⬡", title: "Decoder", desc: "Deploy a parser (ingest difficulty)." },
+  { id: "module_up", icon: "⚙️", title: "Upgraded", desc: "Equip a module on a turret." },
+  { id: "swap_gun", icon: "🔁", title: "Refit", desc: "Swap a turret's gun from the inspector." },
+  { id: "topology", icon: "🧭", title: "Architect", desc: "Draw your own edge in Build mode." },
+  { id: "efficient", icon: "💠", title: "Right-sized", desc: "Clear a wave at ≤ 40cr cost-per-handled." },
+  { id: "scholar", icon: "🎓", title: "Scholar", desc: "Complete every walkthrough." },
+];
+let achWave = 1;
+let achDone = loadAch();
+function loadAch() { try { return new Set(JSON.parse(localStorage.getItem(SK("ach")) || "[]")); } catch (e) { return new Set(); } }
+function saveAch() { try { localStorage.setItem(SK("ach"), JSON.stringify([...achDone])); } catch (e) { /* ignore */ } }
+function unlock(id) {
+  if (achDone.has(id)) return;
+  const a = ACHIEVEMENTS.find((x) => x.id === id);
+  if (!a) return;
+  achDone.add(id); saveAch(); toastAch(a);
+  if (!el("achievements").classList.contains("hidden")) renderAchievements();
+}
+function checkAchievements(s) {
+  if (s.turrets.length) unlock("first_turret");
+  if (s.gates.length) unlock("use_gate");
+  if (s.limiters.length) unlock("use_limiter");
+  if (s.parsers.length) unlock("use_parser");
+  if (s.turrets.some((t) => t.modules && t.modules.length)) unlock("module_up");
+  if (s.turrets.length && !s.coverage_gaps.length && Object.keys(s.stats).length) unlock("coverage");
+  if (s.wave >= 2) unlock("clear_wave");
+  if (s.wave >= 3 && s.leaks === 0) unlock("flawless");
+  if (s.wave > achWave) {                   // a wave just cleared
+    achWave = s.wave;
+    const m = JSON.parse(G.metrics_json());
+    if (m.handled > 0 && m.cost_per_handled <= 40) unlock("efficient");
+  }
+}
+function toastAch(a) {
+  const t = document.createElement("div");
+  t.className = "ach-toast";
+  t.innerHTML = `<span class="ach-ic">${a.icon}</span><div><b>Achievement unlocked</b><div class="ach-t">${a.title}</div></div>`;
+  document.body.appendChild(t);
+  requestAnimationFrame(() => t.classList.add("show"));
+  setTimeout(() => { t.classList.remove("show"); setTimeout(() => t.remove(), 400); }, 3200);
+}
+function renderAchievements() {
+  el("achBody").innerHTML =
+    `<div class="ach-intro">Small goals that map to the pipeline skills. <b>${achDone.size}/${ACHIEVEMENTS.length} unlocked</b></div>
+     <div class="ach-grid">` +
+    ACHIEVEMENTS.map((a) => {
+      const done = achDone.has(a.id);
+      return `<div class="ach-card ${done ? "done" : "locked"}">
+        <span class="ach-ic">${done ? a.icon : "🔒"}</span>
+        <div class="ach-meta"><b>${a.title}</b><span>${a.desc}</span></div></div>`;
+    }).join("") + `</div>`;
 }
 
 // ------------------------------------------------- tutorial + lessons panels

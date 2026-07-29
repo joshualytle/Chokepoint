@@ -72,6 +72,46 @@ def test_selecting_gun_clears_pending_modules():
     assert ed.pending_modules == []
 
 
+# ---- swapping a turret's gun in place ---- #
+def test_swap_gun_charges_only_the_difference():
+    # sieve costs 90, lance costs 240 -> swapping should cost the 150 difference
+    bank = Bank(balance=300)
+    ed = ArsenalEditor(unlocked_at(99), bank=bank)
+    ed.select_gun("sieve")
+    t = ed.place(10, 10)                       # spends 90 -> balance 210
+    assert bank.balance == 210
+    assert ed.swap_gun_at(10, 10, "lance") is True
+    assert t.gun.name == "lance"
+    assert bank.balance == 60                  # 210 + 90 refund - 240 = 60
+
+
+def test_swap_gun_rejected_when_cant_afford_difference():
+    bank = Bank(balance=90)
+    ed = ArsenalEditor(unlocked_at(99), bank=bank)
+    ed.select_gun("sieve")
+    t = ed.place(10, 10)                       # balance now 0
+    assert ed.swap_gun_at(10, 10, "lance") is False
+    assert t.gun.name == "sieve"              # unchanged
+    assert bank.balance == 0                   # nothing charged
+
+
+def test_swap_to_cheaper_gun_refunds_difference():
+    bank = Bank(balance=300)
+    ed = ArsenalEditor(unlocked_at(99), bank=bank)
+    ed.select_gun("lance")
+    ed.place(10, 10)                           # spends 240 -> balance 60
+    assert ed.swap_gun_at(10, 10, "sieve") is True
+    assert bank.balance == 210                 # 60 + 240 refund - 90 = 210
+
+
+def test_swap_gun_rejects_locked_gun_and_bare_noop():
+    ed = ArsenalEditor(unlocked_at(0))         # lance not unlocked yet
+    ed.select_gun("sieve")
+    ed.place(10, 10)
+    assert ed.swap_gun_at(10, 10, "lance") is False   # locked
+    assert ed.swap_gun_at(10, 10, "sieve") is False   # same gun, no modules: no-op
+
+
 # ---- picking / removing ---- #
 def test_turret_at_picks_nearest():
     ed = full_editor()

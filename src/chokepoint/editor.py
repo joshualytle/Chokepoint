@@ -266,6 +266,32 @@ class ArsenalEditor:
             self.bank.earn(gun_cost(target.gun))
         return True
 
+    def swap_gun_at(self, x: float, y: float, name: str, radius: float = PICK_RADIUS) -> bool:
+        """Replace the gun on the turret under the click with a fresh ``name``.
+
+        Budget-aware: the old gun (with its modules) is refunded and the new one
+        charged, so only the *difference* moves. Refuses — changing nothing — if
+        ``name`` isn't unlocked or the balance can't cover a more expensive gun.
+        Modules are not carried over; a swapped gun starts clean.
+        """
+        if name not in self.available_guns():
+            return False
+        target = self.turret_at(x, y, radius)
+        if target is None:
+            return False
+        if name == target.gun.name and not target.gun.modules:
+            return False  # no-op: same gun, nothing equipped to strip
+        new_gun = make_gun(name)
+        if self.bank is not None:
+            old_cost, new_cost = gun_cost(target.gun), gun_cost(new_gun)
+            # only the surplus must be affordable; the refund covers the rest
+            if new_cost - old_cost > 0 and not self.bank.can_afford(new_cost - old_cost):
+                return False
+            self.bank.earn(old_cost)   # refund the old gun in full ...
+            self.bank.spend(new_cost)  # ... then pay for the new one
+        target.gun = new_gun
+        return True
+
     def equip_at(self, x: float, y: float, module: str, radius: float = PICK_RADIUS) -> bool:
         """Attach a module to the turret under the click.
 

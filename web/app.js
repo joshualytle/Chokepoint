@@ -33,6 +33,9 @@ let speed = 1;                             // sim speed multiplier
 let frameN = 0;                            // frame counter (throttle live metrics)
 let lastLeaks = 0;                         // for auto-pause-on-leak
 let last = performance.now();
+let flowT = 0;                             // animation clock for edge flow dashes
+let effects = [];                          // transient flow effects (handled bursts)
+let act = {};                              // per-turret activity: {fired, processed, hot}
 
 const DEFAULT_LOADOUT = `# The board starts empty (you have full credits).
 # Place turrets by clicking a gun in the palette, then a node on the board —
@@ -466,6 +469,8 @@ function frame(now) {
   const s = JSON.parse(G.snapshot_json());
   snap = s;
   over = s.over;
+  flowT += dt;
+  spawnEffects(s, dt);
   if (running && el("autoPause").checked && s.leaks > lastLeaks && !s.over) {  // pause on a fresh leak
     running = false; G.set_paused(true); el("startBtn").textContent = "▶ Start";
     showPlace("a leak got through — paused. Check the coach, then Start.", false);
@@ -874,6 +879,43 @@ function drawBuildOverlay(s) {
   }
 }
 
+// ---------------------------------------------------- flow-animation effects
+function lerpCol(a, b, t) {
+  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+}
+const HOT_COL = [56, 225, 176], AGE_COL = [229, 85, 110];
+
+// diff the real per-turret activity counters into transient visual effects
+function spawnEffects(s, dt) {
+  const nodeById = {};
+  for (const n of s.nodes) nodeById[n.id] = n;
+  const live = {};
+  for (const t of s.turrets) {
+    const a = act[t.id] || { fired: t.fired, processed: t.processed, hot: 0 };
+    if (t.fired > a.fired) a.hot = 0.5;              // fired since last frame -> "working"
+    else a.hot = Math.max(0, a.hot - dt);
+    if (t.processed > a.processed) {                 // consumed a packet -> burst at its node
+      const n = nodeById[t.node];
+      if (n) effects.push({ x: n.x, y: n.y, life: 0.5, max: 0.5, col: t.colors[0] || HOT_COL });
+    }
+    a.fired = t.fired; a.processed = t.processed;
+    live[t.id] = a;
+  }
+  act = live;                                        // drop effects for removed turrets
+  effects = effects.filter((e) => (e.life -= dt) > 0);
+  if (effects.length > 140) effects.splice(0, effects.length - 140);   // safety cap
+}
+
+function drawEffects() {
+  for (const e of effects) {
+    const k = 1 - e.life / e.max;                    // 0 -> 1 as it ages
+    ctx.globalAlpha = (1 - k) * 0.8;
+    ctx.strokeStyle = rgb(e.col); ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(sx(e.x), sy(e.y), 6 + k * 20, 0, 7); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
 // ---------------------------------------------------------------- rendering
 function render(s) {
   ctx.clearRect(0, 0, CW, CH);
@@ -889,6 +931,12 @@ function render(s) {
     ctx.beginPath(); ctx.moveTo(sx(e.ax), sy(e.ay)); ctx.lineTo(sx(e.bx), sy(e.by)); ctx.stroke();
     ctx.strokeStyle = "#33506e"; ctx.lineWidth = 2.5;
     ctx.beginPath(); ctx.moveTo(sx(e.ax), sy(e.ay)); ctx.lineTo(sx(e.bx), sy(e.by)); ctx.stroke();
+    // animated flow dashes travelling in the pipe's direction (data is moving)
+    ctx.save();
+    ctx.strokeStyle = "rgba(56, 225, 176, 0.28)"; ctx.lineWidth = 2;
+    ctx.setLineDash([5, 16]); ctx.lineDashOffset = -flowT * 44;
+    ctx.beginPath(); ctx.moveTo(sx(e.ax), sy(e.ay)); ctx.lineTo(sx(e.bx), sy(e.by)); ctx.stroke();
+    ctx.restore();
     // direction arrow at 65%
     const t = 0.65, mx = e.ax + (e.bx - e.ax) * t, my = e.ay + (e.by - e.ay) * t;
     const ang = Math.atan2(e.by - e.ay, e.bx - e.ax);
@@ -947,17 +995,39 @@ function render(s) {
     }
   }
 
-  // packets: soft glow + bright core, so traffic is alive and readable
+  // packets: soft glow + bright core; waiting packets age their colour toward red
+  // and pulse as they approach the grace period — you SEE where things back up
   for (const p of s.packets) {
+    const age = p.queued && p.grace ? Math.min(p.wait / p.grace, 1) : 0;
+    const col = age > 0 ? lerpCol(p.color, AGE_COL, age) : p.color;
+    const pulse = age > 0.5 ? 1 + 0.5 * Math.sin(flowT * 8) * (age - 0.5) * 2 : 1;
+    ctx.fillStyle = rgb(col);
     ctx.globalAlpha = 0.3;
-    ctx.fillStyle = rgb(p.color);
-    ctx.beginPath(); ctx.arc(sx(p.x), sy(p.y), 7.5, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(sx(p.x), sy(p.y), 7.5 * pulse, 0, 7); ctx.fill();
     ctx.globalAlpha = 1;
     ctx.beginPath(); ctx.arc(sx(p.x), sy(p.y), 3.5, 0, 7); ctx.fill();
+    if (age > 0.85) {                        // about to bleed health: a warning ring
+      ctx.globalAlpha = 0.8; ctx.strokeStyle = rgb(AGE_COL); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(sx(p.x), sy(p.y), 9 * pulse, 0, 7); ctx.stroke(); ctx.globalAlpha = 1;
+    }
   }
 
-  // turrets
+  // turrets — a "working" beam to its node + brighter halo while actively firing
   for (const t of s.turrets) {
+    const hot = (act[t.id] || {}).hot || 0;
+    const n = nodeById[t.node];
+    if (hot > 0 && n) {                       // processing beam: turret is draining this node now
+      ctx.globalAlpha = Math.min(1, hot / 0.5) * 0.7;
+      ctx.strokeStyle = rgb(HOT_COL); ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.moveTo(sx(t.x), sy(t.y)); ctx.lineTo(sx(n.x), sy(n.y)); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    if (hot > 0) {                            // busy halo
+      ctx.globalAlpha = Math.min(1, hot / 0.5) * 0.5;
+      ctx.strokeStyle = rgb(HOT_COL); ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(sx(t.x), sy(t.y), 16, 0, 7); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
     ctx.fillStyle = "#0d1826"; ctx.beginPath(); ctx.arc(sx(t.x), sy(t.y), 12, 0, 7); ctx.fill();
     ctx.strokeStyle = "#38e1b0"; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(sx(t.x), sy(t.y), 12, 0, 7); ctx.stroke();
@@ -967,6 +1037,7 @@ function render(s) {
     ctx.fillText(t.id, sx(t.x) - 8, sy(t.y) - 19);
     t.colors.forEach((c, i) => { ctx.fillStyle = rgb(c); ctx.fillRect(sx(t.x) - 12 + i * 6, sy(t.y) + 17, 5, 5); });
   }
+  drawEffects();                             // handled-packet bursts on top of the flow
   // flow devices: gates (diamond @ fork), limiters (valve), parsers (hexagon)
   for (const g of s.gates || []) {
     const X = sx(g.x), Y = sy(g.y);

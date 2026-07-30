@@ -325,10 +325,12 @@ class World:
             )
             if target is not None:
                 t.cd = 1.0 / t.gun.fire_rate
+                t.fired += 1                    # a shot landed here this tick (UI: working pulse)
                 target.volume -= t.gun.effective_damage() * t.synergy_mult
                 if target.volume <= 0:
                     target.handled = True
                     target.dead = True
+                    t.processed += 1            # packet fully consumed here (UI: handled flash)
                     self.stats[target.kind].handled += 1
                     self.telemetry.on_handle(target.kind, t.node, self.wave_idx, target.wait)
 

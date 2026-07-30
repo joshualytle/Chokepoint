@@ -236,6 +236,8 @@ class Turret:
     node: str = ""            # node whose queue it serves (assigned by the simulation)
     cd: float = 0.0           # fire cooldown
     synergy_mult: float = 1.0  # set each step from active synergies
+    fired: int = 0            # times it has fired (a shot) — drives the "working" pulse
+    processed: int = 0        # packets it has fully consumed — drives the "handled" flash
 
     def accepts(self) -> frozenset[str]:
         return self.gun.effective_accepts()

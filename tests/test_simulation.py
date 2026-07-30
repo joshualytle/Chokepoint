@@ -57,6 +57,17 @@ def test_covered_kind_gets_handled():
     assert auth.handled > 0
 
 
+def test_turret_activity_counters_track_work():
+    # the UI animates flow off these: `fired` per shot, `processed` per packet consumed
+    t = Turret(200, 140, make_gun("sieve"))
+    w = make_world([t])
+    assert t.fired == 0 and t.processed == 0
+    step_for(w, 20)
+    assert t.fired > 0                       # it shot at the queue
+    assert t.processed > 0                   # and fully consumed at least one packet
+    assert t.processed <= w.stats["auth"].handled + w.stats["dns"].handled
+
+
 def test_uncovered_kind_leaks_at_the_sink():
     # only a sieve (auth/dns). Wave 3 of the curriculum is the ids stage; ids is
     # uncovered here, so every ids packet flows untouched to the sink and leaks.

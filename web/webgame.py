@@ -542,11 +542,15 @@ def snapshot() -> dict:
     packets = []
     for p in w.packets:
         x, y = _packet_xy(p, m)
-        packets.append({"x": x, "y": y, "kind": p.kind, "color": list(KINDS[p.kind]["color"])})
+        # wait/queued let the UI age waiting packets toward red; raw shows as grey
+        packets.append({"x": x, "y": y, "kind": p.kind, "color": list(KINDS[p.kind]["color"]),
+                        "wait": round(p.wait, 2), "queued": p.moving_to is None,
+                        "grace": DWELL_GRACE})
     turrets = [{"x": t.x, "y": t.y, "id": t.id, "node": t.node,
                 "gun": t.gun.name, "desc": t.gun.desc, "dps": round(t.dps(), 1),
                 "accepts": sorted(t.accepts()),
                 "modules": [m.name for m in t.gun.modules],
+                "fired": t.fired, "processed": t.processed,
                 "colors": [list(KINDS[k]["color"]) for k in sorted(t.accepts())]}
                for t in w.turrets]
     gates = [{"id": g.id, "x": m.pos(g.node)[0], "y": m.pos(g.node)[1], "node": g.node,

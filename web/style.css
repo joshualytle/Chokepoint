@@ -168,6 +168,18 @@ button.gun.dev.sel .gun-name { color: var(--gate); }
 button.gun.mod.sel { background: #2c2a12; border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber), var(--edge-hl); }
 button.gun.mod.sel .gun-name { color: var(--amber); }
 
+/* ---------------------------------------------------------------- flow legend */
+.flow-legend {
+  display: flex; flex-wrap: wrap; gap: 6px 16px; max-width: 820px;
+  color: var(--muted); font-size: 11.5px; padding: 2px 2px 0;
+}
+.flow-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.flow-legend i { display: inline-block; width: 16px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+.lg-flow { background: repeating-linear-gradient(90deg, var(--phos) 0 4px, transparent 4px 9px); opacity: 0.6; }
+.lg-beam { width: 14px !important; height: 2px !important; background: var(--phos); box-shadow: 0 0 5px var(--phos); }
+.lg-wait { border-radius: 50% !important; width: 9px !important; height: 9px !important; background: var(--danger); }
+.lg-burst { border-radius: 50% !important; width: 10px !important; height: 10px !important; background: transparent; border: 2px solid var(--phos); }
+
 /* ---------------------------------------------------------------- board tip */
 .board-tip {
   position: absolute; z-index: 5; pointer-events: none;

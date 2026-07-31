@@ -61,7 +61,13 @@ header h1 {
   text-shadow: 0 0 18px rgba(56, 225, 176, 0.35);
 }
 header .tag { color: var(--muted); font-size: 13px; }
-.ui-zoom { margin-left: auto; display: inline-flex; gap: 4px; }
+.bmc {
+  margin-left: auto; text-decoration: none; white-space: nowrap;
+  color: #0d1826; background: var(--amber); font-size: 12.5px; font-weight: bold;
+  border-radius: 999px; padding: 5px 12px; border: 1px solid var(--amber);
+}
+.bmc:hover { filter: brightness(1.08); }
+.ui-zoom { display: inline-flex; gap: 4px; }
 .ui-zoom button { padding: 4px 10px; border: 1px solid var(--grid); border-radius: var(--r-s); color: var(--muted); }
 .ui-zoom button:hover { color: var(--ink); border-color: var(--muted); }
 

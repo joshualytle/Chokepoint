@@ -3,6 +3,7 @@
 [![CI](https://github.com/joshualytle/Chokepoint/actions/workflows/ci.yml/badge.svg)](https://github.com/joshualytle/Chokepoint/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-f2c85a?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/joshua1lytp)
 
 A typed-alert tower-defense for learning Python. Alerts of different **kinds**
 (`auth`, `ids`, `dns`, `firewall`, `email`, `cloudtrail`, `endpoint`, `waf`,
@@ -138,6 +139,10 @@ the ground rules, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for how we work
 together. Found a security issue? Please report it privately per
 [SECURITY.md](SECURITY.md). Changes of note are tracked in
 [CHANGELOG.md](CHANGELOG.md).
+
+If the project helped you learn something, you can
+[buy me a coffee](https://buymeacoffee.com/joshua1lytp) ☕ — it keeps the work
+open-source and free. Thank you!
 
 ## License & attribution
 

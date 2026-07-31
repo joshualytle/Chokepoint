@@ -61,6 +61,22 @@ def new_game(map_name: str = "trunk", difficulty: str = "easy") -> str:
     return json.dumps({"ok": True, "maps": MAP_LIST, "difficulties": DIFFICULTY_LIST})
 
 
+def start_at_wave(level: int) -> str:
+    """Begin a fresh run at ``level`` (1 = the start), granting the budget and
+    unlocks the player would have if they'd cleared the earlier waves. Used by the
+    browser 'resume' — pick up on any level up to the last one you cleared."""
+    assert _world is not None and _editor is not None
+    new_game(_world.map.name, _world.difficulty)   # fresh world, paused, empty editor
+    i = max(0, int(level) - 1)
+    _world.wave_idx = i
+    earned = sum(_world.wave_income(w) for w in range(1, i + 1))
+    _world.bank.balance = _world.starting_credits + earned
+    _world.load_wave(i)
+    _world.intermission = 2.5                       # a short "get ready" before spawns
+    _editor.set_unlocked(_world.unlocked())
+    return json.dumps({"ok": True, "level": i + 1})
+
+
 def _sync() -> None:
     """Push the editor's placements to the world and re-derive gate routing."""
     assert _world is not None and _editor is not None
@@ -613,6 +629,7 @@ def snapshot() -> dict:
         "leaks": w.leaks, "max_leaks": MAX_LEAK, "credits": w.bank.balance,
         "coverage_gaps": gaps, "over": w.over, "won": w.won, "paused": w.paused,
         "started": w.started, "upcoming": upcoming, "coach": coach, "debrief": debrief,
+        "intermission": round(max(0.0, w.intermission), 1),
         "unlocked": sorted(w.unlocked()), "can_undo": len(_undo) > 0,
         "nodes": nodes, "edges": edges, "packets": packets,
         "turrets": turrets, "gates": gates, "limiters": limiters, "parsers": parsers,

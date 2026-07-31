@@ -40,6 +40,7 @@
           <button id="undoBtn" title="Undo the last placement or build edit (Ctrl+Z)">↶ Undo</button>
           <button id="buildBtn" title="Edit the topology: add nodes and edges">🔧 Build</button>
           <button id="learnBtn" title="Guided walkthroughs: spill, gates, parsers, modules">🎓 Learn</button>
+          <button id="levelsBtn" title="Continue or jump to a cleared level">🗂 Levels</button>
           <button id="trophyBtn" title="Achievements you've unlocked">🏆 Goals</button>
           <button id="metricsBtn" title="Run telemetry: per-kind and per-node stats">📊 Metrics</button>
           <button id="helpBtn" title="Glossary of concepts">❔ Help</button>
@@ -69,6 +70,7 @@
       <div id="inspector" class="inspector hidden"></div>
       <div id="lessons" class="lessons"></div>
       <div id="hud" class="hud"></div>
+      <div id="coachbox"></div>
 
       <div class="editor-wrap">
         <div class="editor-head">
@@ -111,6 +113,13 @@
     <div class="modal-box">
       <div class="modal-head"><span>Goals — achievements</span><button id="achClose">✕</button></div>
       <div id="achBody"></div>
+    </div>
+  </div>
+
+  <div id="resumeModal" class="modal hidden">
+    <div class="modal-box">
+      <div class="modal-head"><span>Continue your run</span><button id="rzClose">✕</button></div>
+      <div id="resumeBody"></div>
     </div>
   </div>
 

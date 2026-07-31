@@ -282,6 +282,14 @@ button.gun.mod.sel .gun-name { color: var(--amber); }
 .insp-remove em { font-style: normal; color: var(--muted); font-size: 11px; }
 .insp-remove:hover { border-color: var(--danger); background: rgba(229, 85, 110, 0.1); }
 
+/* ---------------------------------------------------------------- resume/levels */
+#resumeBody { padding: 16px; }
+.rz-intro { color: var(--ink); font-size: 13px; line-height: 1.6; margin-bottom: 14px; }
+.rz-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.rz-row.rz-pick { color: var(--muted); }
+.rz-row select { padding: 7px 10px; }
+.rz-note { color: var(--muted); font-size: 12px; }
+
 /* ---------------------------------------------------------------- achievements */
 .ach-toast {
   position: fixed; right: 18px; bottom: 18px; z-index: 60;

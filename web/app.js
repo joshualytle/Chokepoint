@@ -103,6 +103,7 @@ async function boot() {
     grant_sandbox_credits: pyodide.globals.get("grant_sandbox_credits"),
     metrics_json: pyodide.globals.get("metrics_json"),
     undo: pyodide.globals.get("undo"),
+    start_at_wave: pyodide.globals.get("start_at_wave"),
     walkthroughs_json: pyodide.globals.get("walkthroughs_json"),
     start_walkthrough: pyodide.globals.get("start_walkthrough"),
   };
@@ -134,6 +135,7 @@ async function boot() {
 
   wireUI();
   el("boot").classList.add("hidden");
+  if (maxCleared() > 0) renderResume();      // returning player: offer continue/restart/jump
   requestAnimationFrame(frame);
 }
 
@@ -154,6 +156,7 @@ function newGame() {
   refreshPalette();
   closeInspector();
   achWave = 1; lastWave = 1; levelBreak = null; pinnedCoach = null; coachMute = "";
+  lastOverlaySig = ""; lastCoachHtml = "";
   el("startBtn").textContent = "▶ Start";
 }
 
@@ -210,6 +213,56 @@ function markWtDone(name) {
   showPlace(`🎓 completed “${name}”`, true);
   if (wtList.length && wtList.every((w) => wtDone.has(w.id))) unlock("scholar");
   if (!el("walkthroughs").classList.contains("hidden")) renderWalkthroughs();
+}
+
+// ---- run progress: highest level cleared per map+difficulty (browser-local) ----
+let progress = loadProgress();
+function loadProgress() { try { return JSON.parse(localStorage.getItem(SK("progress")) || "{}"); } catch (e) { return {}; } }
+function saveProgress() { try { localStorage.setItem(SK("progress"), JSON.stringify(progress)); } catch (e) { /* ignore */ } }
+function progKey() { return `${el("mapSel").value}|${el("diffSel").value}`; }
+function maxCleared() { return progress[progKey()] || 0; }
+function recordCleared(level) {
+  const k = progKey();
+  if ((progress[k] || 0) < level) { progress[k] = level; saveProgress(); }
+}
+
+function renderResume() {
+  const mc = maxCleared();
+  const where = progKey().replace("|", " · ");
+  const body = el("resumeBody");
+  if (mc <= 0) {
+    body.innerHTML = `<div class="rz-intro">No cleared levels saved yet on <b>${where}</b>.
+      Clear a level and your progress is stored in this browser so you can pick up later.</div>`;
+  } else {
+    let opts = "";
+    for (let L = 1; L <= mc + 1; L++)
+      opts += `<option value="${L}"${L === mc + 1 ? " selected" : ""}>Level ${L}${L > mc ? " — next" : ""}</option>`;
+    body.innerHTML = `
+      <div class="rz-intro">On <b>${where}</b> you cleared up to <b>Level ${mc}</b>. Continue, restart, or jump to any level up to the next one.</div>
+      <div class="rz-row">
+        <button id="rzContinue" class="primary">▶ Continue at level ${mc + 1}</button>
+        <button id="rzRestart">↺ Restart at level 1</button>
+      </div>
+      <div class="rz-row rz-pick">Jump to <select id="rzPick">${opts}</select>
+        <button id="rzGo" class="primary">Go</button></div>
+      <div class="rz-note">Progress is saved in this browser only (no account, no upload).</div>`;
+    el("rzContinue").onclick = () => resumeAt(mc + 1);
+    el("rzRestart").onclick = () => resumeAt(1);
+    el("rzGo").onclick = () => resumeAt(+el("rzPick").value);
+  }
+  el("resumeModal").classList.remove("hidden");
+}
+
+function resumeAt(level) {
+  el("resumeModal").classList.add("hidden");
+  running = false; over = false;
+  G.start_at_wave(level);
+  applyLoadout();                          // re-deploy the code build at the new budget
+  refreshPalette(); closeInspector();
+  lastWave = level; achWave = level; levelBreak = null;
+  lastOverlaySig = ""; lastCoachHtml = ""; pinnedCoach = null; coachMute = "";
+  el("startBtn").textContent = "▶ Start";
+  showPlace(level > 1 ? `ready at level ${level}` : "restarted at level 1", true);
 }
 
 function setStatus(msg, ok) {
@@ -368,7 +421,7 @@ function wireUI() {
   };
   el("endless").onchange = (e) => {
     endless = e.target.checked;
-    if (endless && levelBreak && levelBreak.count === null) levelBreak.count = 3.0;
+    if (endless && levelBreak && levelBreak.count === null) levelBreak.count = 5.0;
   };
   el("helpBtn").onclick = () => el("glossary").classList.toggle("hidden");
   el("glossClose").onclick = () => el("glossary").classList.add("hidden");
@@ -378,8 +431,10 @@ function wireUI() {
   el("wtClose").onclick = () => el("walkthroughs").classList.add("hidden");
   el("trophyBtn").onclick = () => { el("achievements").classList.toggle("hidden"); renderAchievements(); };
   el("achClose").onclick = () => el("achievements").classList.add("hidden");
+  el("levelsBtn").onclick = () => renderResume();
+  el("rzClose").onclick = () => el("resumeModal").classList.add("hidden");
   // coach "show me": pulse the palette card / editor the fix refers to
-  el("hud").addEventListener("click", (e) => {
+  el("coachbox").addEventListener("click", (e) => {
     const dismiss = e.target.closest(".coach-dismiss");
     if (dismiss) { coachMute = dismiss.dataset.text.replace(/&quot;/g, '"'); pinnedCoach = null; return; }
     const learn = e.target.closest(".coach-learn");
@@ -499,8 +554,9 @@ function frame(now) {
   // endless mode counts down and resumes on its own, otherwise wait for Start.
   if (!s.over && s.wave > lastWave && !levelBreak) {
     const cleared = lastWave; lastWave = s.wave;
+    recordCleared(cleared);                   // persist highest level cleared (resume)
     running = false; G.set_paused(true); el("startBtn").textContent = `▶ Start level ${s.wave}`;
-    levelBreak = { cleared, next: s.wave, count: endless ? 3.0 : null };
+    levelBreak = { cleared, next: s.wave, count: endless ? 5.0 : null };
   }
   if (levelBreak && levelBreak.count !== null) {   // endless countdown
     levelBreak.count -= dt;
@@ -580,8 +636,25 @@ function resumeFromBreak() {
   el("startBtn").textContent = "❚❚ Pause";
 }
 
+// Overlay is rebuilt ONLY when its signature changes — otherwise its buttons
+// would be recreated every frame and clicks would never land.
+let lastOverlaySig = "";
 function renderOverlay(s) {
   const box = el("boardOverlay");
+  let sig;
+  if (s.over) sig = `over|${s.won}`;
+  else if (levelBreak) sig = `break|${levelBreak.cleared}|${levelBreak.next}|${levelBreak.count !== null}`;
+  else sig = "hidden";
+
+  if (sig === lastOverlaySig) {                 // only the live countdown text updates each frame
+    if (levelBreak && levelBreak.count !== null) {
+      const c = el("ovCount");
+      if (c) c.textContent = `next level in ${Math.max(0, Math.ceil(levelBreak.count))}…`;
+    }
+    return;
+  }
+  lastOverlaySig = sig;
+
   if (s.over) {
     box.classList.remove("hidden");
     let html = `<h2 class="${s.won ? "won" : "lost"}">${s.won ? "PIPELINE HELD ✓" : "PIPELINE OVERWHELMED ✕"}</h2>`;
@@ -610,7 +683,7 @@ function renderLevelBreak(s) {
     return `<span style="color:${ok ? "var(--phos)" : "var(--danger)"}">${ok ? "✓" : "✗"} ${u.kind}×${u.n}</span>`;
   }).join("  ") : "—";
   const action = levelBreak.count !== null
-    ? `<div class="ov-count">next level in ${Math.ceil(levelBreak.count)}…</div>
+    ? `<div class="ov-count" id="ovCount">next level in ${Math.ceil(levelBreak.count)}…</div>
        <button id="ovStart" class="primary">Start now</button>`
     : `<button id="ovStart" class="primary">▶ Start level ${levelBreak.next}</button>`;
   box.innerHTML = `
@@ -1167,13 +1240,15 @@ function updateHUD(s) {
     <table class="kinds">
       <tr><th>kind</th><th>in</th><th>ok</th><th>leak</th><th>now</th></tr>
       ${rows || `<tr><td colspan="5" style="color:var(--muted)">no traffic yet</td></tr>`}
-    </table>
-    ${coachHtml(s)}`;
+    </table>`;
+  renderCoach(s);                         // coach lives in its own box so its buttons persist
 
   // wave / start prompt over the board
   const msg = el("waveMsg");
   if (s.over) { msg.textContent = s.won ? "PIPELINE HELD ✓" : "PIPELINE OVERWHELMED ✕"; }
-  else if (!running && s.upcoming.length) {
+  else if (running && s.intermission > 0) {   // brief "get ready" window before spawns
+    msg.textContent = `Level ${s.wave} — get ready, incoming in ${Math.ceil(s.intermission)}…`;
+  } else if (!running && s.upcoming.length) {
     // proactive coverage check: flag incoming kinds you can't handle yet, before they leak
     const covered = new Set();
     s.turrets.forEach((t) => t.accepts.forEach((k) => covered.add(k)));
@@ -1220,6 +1295,15 @@ function updateCoachPin(s) {
     pinnedCoach = null; coachMute = "";      // genuinely resolved — clear the pin
   }
   // otherwise (tip / no hint): keep whatever is pinned so it persists
+}
+
+let lastCoachHtml = "";
+function renderCoach(s) {
+  const html = coachHtml(s);              // only touch the DOM when it actually changes,
+  if (html !== lastCoachHtml) {           // so the buttons aren't recreated every frame
+    lastCoachHtml = html;
+    el("coachbox").innerHTML = html;
+  }
 }
 
 function coachHtml(s) {

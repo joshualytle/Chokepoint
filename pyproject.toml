@@ -43,6 +43,8 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# so tests can import both the game core (src) and the web bridge (web/webgame.py)
+pythonpath = ["src", "web"]
 
 [tool.ruff]
 line-length = 100

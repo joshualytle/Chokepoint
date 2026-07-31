@@ -265,10 +265,12 @@ function renderResume() {
       </div>
       <div class="rz-row rz-pick">Jump to <select id="rzPick">${opts}</select>
         <button id="rzGo" class="primary">Go</button></div>
-      <div class="rz-note">Progress is saved in this browser only (no account, no upload).</div>`;
+      <div class="rz-note">Progress is saved in this browser only (no account, no upload).
+        <button id="rzClear" class="rz-clear">clear progress for ${where}</button></div>`;
     el("rzContinue").onclick = () => resumeAt(mc + 1);
     el("rzRestart").onclick = () => resumeAt(1);
     el("rzGo").onclick = () => resumeAt(+el("rzPick").value);
+    el("rzClear").onclick = () => { delete progress[progKey()]; saveProgress(); renderResume(); };
   }
   el("resumeModal").classList.remove("hidden");
 }
@@ -346,7 +348,7 @@ function refreshPalette() {
       <span class="gun-kinds">${m.desc}</span>
     </button>`).join("");
   el("palette").innerHTML =
-    `<div class="palette-head">Tap a GUN or DEVICE, then tap the board to place (snaps to the line). Tap a placed item to inspect &amp; edit its code; drag to move it.</div>` +
+    `<div class="palette-head">Tap a GUN or DEVICE, then tap the board to place (snaps to the line). Tap a placed item to inspect &amp; edit its code; drag to move it. <span style="opacity:.7">Space = start/pause · Esc = close/deselect</span></div>` +
     gunHtml +
     `<div class="palette-sub">FLOW DEVICES — parsers are code-only (build_parsers)</div>` +
     devHtml +
@@ -371,6 +373,25 @@ function eventToWorld(e) {
 function inEditor() {
   const a = document.activeElement;
   return a && a.closest && a.closest(".CodeMirror");   // let CodeMirror keep its own Ctrl+Z
+}
+
+const MODALS = ["glossary", "metrics", "walkthroughs", "achievements", "resumeModal"];
+function anyModalOpen() { return MODALS.some((m) => !el(m).classList.contains("hidden")); }
+function clearSelection() {                   // toggle off whatever is selected in the palette
+  if (selectedGun) G.select_gun(selectedGun);
+  else if (deviceMode) G.select_device(deviceMode);
+  else if (selectedModule) G.select_module(selectedModule);
+  refreshPalette();
+}
+// Esc closes the top-most thing: open modal -> inspector -> palette selection
+function handleEscape() {
+  for (const m of MODALS) {
+    const box = el(m);
+    if (box && !box.classList.contains("hidden")) { box.classList.add("hidden"); return true; }
+  }
+  if (insp) { closeInspector(); return true; }
+  if (selectedGun || deviceMode || selectedModule) { clearSelection(); return true; }
+  return false;
 }
 
 // ---- targeted code highlighting: TODO task lines + the line an error points at ----
@@ -432,6 +453,7 @@ function showPlace(msg, ok) {
 }
 
 function wireUI() {
+  el("startBtn").title = "Start / pause (Space)";
   el("startBtn").onclick = () => {
     if (over) return;
     if (levelBreak) { resumeFromBreak(); return; }   // continue to the next level
@@ -441,6 +463,7 @@ function wireUI() {
   };
   el("endless").onchange = (e) => {
     endless = e.target.checked;
+    try { localStorage.setItem(SK("endless"), endless ? "1" : "0"); } catch (err) { /* ignore */ }
     if (endless && levelBreak && levelBreak.count === null) levelBreak.count = 5.0;
   };
   el("helpBtn").onclick = () => el("glossary").classList.toggle("hidden");
@@ -476,17 +499,31 @@ function wireUI() {
   el("copyBtn").onclick = exportSaveCode;
   el("loadBtn").onclick = importSaveCode;
   el("stepBtn").onclick = () => { if (!over) G.step(1 / 60); };
+  const savedSpeed = +localStorage.getItem(SK("speed"));
+  if (savedSpeed >= 1 && savedSpeed <= 3) speed = savedSpeed;
   document.querySelectorAll("button.spd").forEach((b) => {
     if (+b.dataset.spd === speed) b.classList.add("primary");
     b.onclick = () => {
       speed = +b.dataset.spd;
+      try { localStorage.setItem(SK("speed"), String(speed)); } catch (e) { /* ignore */ }
       document.querySelectorAll("button.spd").forEach((x) => x.classList.toggle("primary", x === b));
     };
   });
+  // restore + persist the toggles
+  el("autoPause").checked = localStorage.getItem(SK("autopause")) === "1";
+  el("autoPause").onchange = (e) => { try { localStorage.setItem(SK("autopause"), e.target.checked ? "1" : "0"); } catch (err) { /* ignore */ } };
+  endless = localStorage.getItem(SK("endless")) === "1";
+  el("endless").checked = endless;
   el("resetBtn").onclick = newGame;
   el("undoBtn").onclick = doUndo;
   document.addEventListener("keydown", (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === "z" && !inEditor()) { e.preventDefault(); doUndo(); }
+    if ((e.ctrlKey || e.metaKey) && e.key === "z" && !inEditor()) { e.preventDefault(); doUndo(); return; }
+    const tag = (document.activeElement && document.activeElement.tagName) || "";
+    const typing = inEditor() || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+    if (e.key === "Escape") { if (handleEscape()) e.preventDefault(); return; }
+    if ((e.code === "Space" || e.key === " ") && !typing && !anyModalOpen()) {
+      e.preventDefault(); el("startBtn").click();   // start / pause / continue next level
+    }
   });
   el("mapSel").onchange = newGame;
   el("diffSel").onchange = newGame;
@@ -578,6 +615,7 @@ function frame(now) {
   }
   lastLeaks = s.leaks;
   if (over && running) { running = false; el("startBtn").textContent = "▶ Start"; }
+  if (s.over && s.won) recordCleared(Math.max(0, s.wave - 1));   // save on a win too
 
   // between-level pause: a wave just cleared. Halt so the player can adjust;
   // endless mode counts down and resumes on its own, otherwise wait for Start.

@@ -300,6 +300,7 @@ button.gun.mod.sel .gun-name { color: var(--amber); }
 .rz-row.rz-pick { color: var(--muted); }
 .rz-row select { padding: 7px 10px; }
 .rz-note { color: var(--muted); font-size: 12px; }
+.rz-clear { color: var(--danger); background: none; border: 0; padding: 0 0 0 4px; font: inherit; text-decoration: underline; cursor: pointer; }
 
 /* ---------------------------------------------------------------- achievements */
 .ach-toast {

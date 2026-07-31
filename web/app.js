@@ -5,9 +5,17 @@ const OFFX = 40, OFFY = 0;
 const canvas = document.getElementById("board");
 const ctx = canvas.getContext("2d");
 const DPR = window.devicePixelRatio || 1;
-const CW = 820, CH = 620;
-canvas.width = CW * DPR; canvas.height = CH * DPR;
-ctx.scale(DPR, DPR);                       // crisp on hi-DPI displays
+const CW = 820, CH = 620;                  // logical world size (drawing coords)
+let boardScale = 1;                        // display size / logical size
+// The board fills its column and stays crisp: the backing store tracks the
+// displayed CSS size × DPR, and render() scales world coords to fit.
+function resizeBoard() {
+  const cssW = canvas.clientWidth || CW;
+  const cssH = cssW * CH / CW;
+  canvas.width = Math.max(1, Math.round(cssW * DPR));
+  canvas.height = Math.max(1, Math.round(cssH * DPR));
+  boardScale = cssW / CW;
+}
 const sx = (x) => x + OFFX, sy = (y) => y + OFFY;
 const rgb = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
 if (!CanvasRenderingContext2D.prototype.roundRect) {   // older mobile browsers
@@ -134,10 +142,22 @@ async function boot() {
   buildGlossary();
 
   wireUI();
+  applyZoom();                               // restore saved UI zoom
   el("boot").classList.add("hidden");
+  resizeBoard();                             // size the board to its column now that it's visible
   if (maxCleared() > 0) renderResume();      // returning player: offer continue/restart/jump
   requestAnimationFrame(frame);
 }
+
+// ---- UI zoom: scale the whole interface (text + board) up/down ----
+let uiZoom = parseFloat(localStorage.getItem(SK("zoom"))) || 1;
+function applyZoom() {
+  uiZoom = Math.min(1.8, Math.max(0.7, uiZoom));
+  document.documentElement.style.zoom = uiZoom;
+  try { localStorage.setItem(SK("zoom"), String(uiZoom)); } catch (e) { /* ignore */ }
+  requestAnimationFrame(resizeBoard);        // layout changed — refit the board
+}
+function bumpZoom(delta) { uiZoom += delta; applyZoom(); }
 
 function fillSelect(sel, items, current) {
   sel.innerHTML = "";
@@ -470,6 +490,15 @@ function wireUI() {
   });
   el("mapSel").onchange = newGame;
   el("diffSel").onchange = newGame;
+  el("zoomIn").onclick = () => bumpZoom(0.1);
+  el("zoomOut").onclick = () => bumpZoom(-0.1);
+  window.addEventListener("resize", () => requestAnimationFrame(resizeBoard));
+  // Ctrl/⌘ + wheel zooms the whole UI (plain wheel still scrolls the page/editor)
+  window.addEventListener("wheel", (e) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    bumpZoom(e.deltaY < 0 ? 0.1 : -0.1);
+  }, { passive: false });
   el("runBtn").onclick = applyLoadout;   // CodeMirror handles Ctrl/Cmd-Enter + Tab
   el("buildBtn").onclick = () => {
     buildMode = !buildMode; edgeSrc = null;
@@ -1052,6 +1081,8 @@ function drawEffects() {
 
 // ---------------------------------------------------------------- rendering
 function render(s) {
+  // scale world coords -> displayed pixels (DPR + fluid board size), every frame
+  ctx.setTransform(DPR * boardScale, 0, 0, DPR * boardScale, 0, 0);
   ctx.clearRect(0, 0, CW, CH);
   // faint dot grid so the space reads as a surface, not a void
   ctx.fillStyle = "rgba(230, 238, 246, 0.045)";

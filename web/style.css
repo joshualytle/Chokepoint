@@ -61,15 +61,20 @@ header h1 {
   text-shadow: 0 0 18px rgba(56, 225, 176, 0.35);
 }
 header .tag { color: var(--muted); font-size: 13px; }
+.ui-zoom { margin-left: auto; display: inline-flex; gap: 4px; }
+.ui-zoom button { padding: 4px 10px; border: 1px solid var(--grid); border-radius: var(--r-s); color: var(--muted); }
+.ui-zoom button:hover { color: var(--ink); border-color: var(--muted); }
 
 main {
   display: flex; gap: 18px; padding: 18px; align-items: flex-start;
   flex-wrap: wrap;
 }
-.board-col { display: flex; flex-direction: column; gap: 12px; }
+/* board grows to fill the space; side panel keeps a sensible min width */
+.board-col { display: flex; flex-direction: column; gap: 12px; flex: 1 1 620px; min-width: 340px; }
 
 /* ---------------------------------------------------------------- board */
-.board-stack { position: relative; width: 820px; max-width: 100%; }
+/* fill the column, but never taller than the viewport (820/620 ≈ 1.32 aspect) */
+.board-stack { position: relative; width: 100%; max-width: min(1040px, calc(80vh * 1.32)); }
 
 canvas#board {
   display: block;
@@ -77,8 +82,8 @@ canvas#board {
   border: 1px solid var(--grid);
   border-radius: var(--r);
   box-shadow: var(--shadow), var(--edge-hl);
-  width: 820px; height: 620px;   /* logical CSS size; backing store scaled by DPR */
-  max-width: 100%;
+  width: 100%;                   /* fills the column */
+  aspect-ratio: 820 / 620;       /* keeps the board's shape; JS sizes the backing store */
   touch-action: none;            /* taps place turrets instead of scrolling (mobile) */
 }
 
@@ -141,7 +146,7 @@ button.primary kbd { color: var(--phos); border-color: rgba(56, 225, 176, 0.4); 
 /* ---------------------------------------------------------------- palette */
 .palette {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
-  gap: 8px; max-width: 820px;
+  gap: 8px; width: 100%;
 }
 .palette-head, .palette-sub { grid-column: 1 / -1; }
 .palette-head { color: var(--muted); font-size: 12.5px; }
@@ -170,7 +175,7 @@ button.gun.mod.sel .gun-name { color: var(--amber); }
 
 /* ---------------------------------------------------------------- flow legend */
 .flow-legend {
-  display: flex; flex-wrap: wrap; gap: 6px 16px; max-width: 820px;
+  display: flex; flex-wrap: wrap; gap: 6px 16px; width: 100%;
   color: var(--muted); font-size: 11.5px; padding: 2px 2px 0;
 }
 .flow-legend span { display: inline-flex; align-items: center; gap: 6px; }

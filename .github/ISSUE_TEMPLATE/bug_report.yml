@@ -1,0 +1,50 @@
+name: Bug report
+description: Something isn't working as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for taking the time to file a bug! Please fill out the details below.
+  - type: dropdown
+    id: build
+    attributes:
+      label: Which build?
+      options:
+        - Desktop (python -m chokepoint)
+        - Web (web/ — browser)
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+      placeholder: I placed a turret and…
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start the game on the trunk map
+        2. …
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: OS, Python version (desktop), or browser + version (web).
+      placeholder: Windows 11 · Python 3.12 · or Chrome 126
+    validations:
+      required: false
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output / traceback
+      description: For the web build, the browser console (F12) helps a lot.
+      render: shell
+    validations:
+      required: false

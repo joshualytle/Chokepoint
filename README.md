@@ -1,5 +1,9 @@
 # Chokepoint
 
+[![CI](https://github.com/joshualytle/Chokepoint/actions/workflows/ci.yml/badge.svg)](https://github.com/joshualytle/Chokepoint/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
+
 A typed-alert tower-defense for learning Python. Alerts of different **kinds**
 (`auth`, `ids`, `dns`, `firewall`, `email`, `cloudtrail`, `endpoint`, `waf`,
 `vuln`) flow a pipeline and **queue at nodes**. **Turrets** are typed consumers —
@@ -127,6 +131,28 @@ style); quelimiters smooth bursts (but their buffer is finite, so sustained load
 still needs throughput). Fire rate is static — you scale with modules, more
 consumers, routing, and synergies. That's the alert-pipeline lesson, playable.
 
-## License
+## Contributing & community
 
-Released under the [MIT License](LICENSE).
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for setup and
+the ground rules, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for how we work
+together. Found a security issue? Please report it privately per
+[SECURITY.md](SECURITY.md). Changes of note are tracked in
+[CHANGELOG.md](CHANGELOG.md).
+
+## License & attribution
+
+Chokepoint is released under the [MIT License](LICENSE) — you're free to **use,
+copy, modify, and distribute** it, including in your own projects, courses, or
+products, and at no cost. In plain terms, the license asks one thing in return:
+
+> **Keep the attribution.** Retain the copyright notice and the MIT license text
+> (the `LICENSE` file) in any copy or substantial portion of the software.
+
+That's the whole deal — credit stays, and the software is provided "as is,"
+without warranty. If you fork it or build something on top, a link back to
+[this repository](https://github.com/joshualytle/Chokepoint) is appreciated but
+not required; a [CITATION.cff](CITATION.cff) is included if you'd like to cite it
+formally (GitHub renders a "Cite this repository" button from it).
+
+Cloning, forking, and starring are all welcome. If you're using it to teach or
+learn, I'd love to hear about it.

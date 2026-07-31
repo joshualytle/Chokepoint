@@ -1,0 +1,30 @@
+name: Feature request
+description: Suggest an idea — new content, a teaching aid, or an improvement
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's the idea?
+      description: What would you like to see, and what problem does it solve?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - New content (gun / module / kind / map)
+        - Teaching / coaching / walkthroughs
+        - Web UI/UX
+        - Simulation / mechanics
+        - Other
+    validations:
+      required: false
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else?
+      description: Alternatives you considered, sketches, references, etc.
+    validations:
+      required: false

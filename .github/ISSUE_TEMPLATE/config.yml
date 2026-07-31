@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question or discussion
+    url: https://github.com/joshualytle/Chokepoint/discussions
+    about: Ask a question or share how you're using Chokepoint.
+  - name: Report a security issue (private)
+    url: https://github.com/joshualytle/Chokepoint/security/advisories/new
+    about: Please report vulnerabilities privately, not as a public issue.

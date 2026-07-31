@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+title: "Chokepoint: a typed-alert tower-defense for learning Python"
+message: "If you use, fork, or build on this project, please cite it and keep the attribution."
+type: software
+authors:
+  - name: "joshualytle"
+    website: "https://github.com/joshualytle"
+repository-code: "https://github.com/joshualytle/Chokepoint"
+url: "https://github.com/joshualytle/Chokepoint"
+abstract: >-
+  Chokepoint is a typed-alert tower-defense game that teaches the skills behind
+  high-volume alert pipelines — typed routing, consumer specialization and
+  coverage, queue/latency backpressure, and flood/burst handling — as a game.
+  It ships a desktop (pygame) build and a native-web build (Pyodide + HTML/canvas)
+  where the same pure Python core runs in the browser and the player writes
+  Python to hold the line.
+keywords:
+  - tower-defense
+  - learning-python
+  - alert-pipeline
+  - education
+  - pygame
+  - pyodide
+license: MIT

@@ -36,6 +36,11 @@ let last = performance.now();
 let flowT = 0;                             // animation clock for edge flow dashes
 let effects = [];                          // transient flow effects (handled bursts)
 let act = {};                              // per-turret activity: {fired, processed, hot}
+let lastWave = 1;                          // for detecting a cleared level
+let levelBreak = null;                     // {cleared, next, count} between-level pause
+let endless = false;                       // keep running through waves automatically
+let pinnedCoach = null;                    // a danger/warn hint that persists until fixed/dismissed
+let coachMute = "";                        // text the user dismissed (don't re-pin until it changes)
 
 const DEFAULT_LOADOUT = `# The board starts empty (you have full credits).
 # Place turrets by clicking a gun in the palette, then a node on the board —
@@ -148,7 +153,7 @@ function newGame() {
   applyLoadout();
   refreshPalette();
   closeInspector();
-  achWave = 1;
+  achWave = 1; lastWave = 1; levelBreak = null; pinnedCoach = null; coachMute = "";
   el("startBtn").textContent = "▶ Start";
 }
 
@@ -327,12 +332,17 @@ function itemNear(x, y) {
 }
 
 function drawDragGhost() {
-  if (!snap) return;                       // show where the dragged item will snap (nearest node)
+  if (!snap) return;                       // ring follows the cursor (free positioning)
+  ctx.strokeStyle = "#e6eef6"; ctx.lineWidth = 2; ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.arc(sx(drag.curX), sy(drag.curY), 14, 0, 7); ctx.stroke();
+  // hint which node it'll serve from here
   let best = null, bd = 1e9;
   for (const n of snap.nodes) { const d = (n.x - drag.curX) ** 2 + (n.y - drag.curY) ** 2; if (d < bd) { bd = d; best = n; } }
-  if (!best) return;
-  ctx.strokeStyle = "#38e1b0"; ctx.lineWidth = 2; ctx.setLineDash([4, 4]);
-  ctx.beginPath(); ctx.arc(sx(best.x), sy(best.y), 16, 0, 7); ctx.stroke(); ctx.setLineDash([]);
+  if (best) {
+    ctx.strokeStyle = "rgba(56, 225, 176, 0.4)"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(sx(drag.curX), sy(drag.curY)); ctx.lineTo(sx(best.x), sy(best.y)); ctx.stroke();
+  }
+  ctx.setLineDash([]);
 }
 function doUndo() {
   if (JSON.parse(G.undo()).ok) { refreshPalette(); showPlace("undone", true); }
@@ -351,9 +361,14 @@ function showPlace(msg, ok) {
 function wireUI() {
   el("startBtn").onclick = () => {
     if (over) return;
+    if (levelBreak) { resumeFromBreak(); return; }   // continue to the next level
     running = !running;
     if (running) { G.begin(); el("startBtn").textContent = "❚❚ Pause"; }
     else { G.set_paused(true); el("startBtn").textContent = "▶ Start"; }
+  };
+  el("endless").onchange = (e) => {
+    endless = e.target.checked;
+    if (endless && levelBreak && levelBreak.count === null) levelBreak.count = 3.0;
   };
   el("helpBtn").onclick = () => el("glossary").classList.toggle("hidden");
   el("glossClose").onclick = () => el("glossary").classList.add("hidden");
@@ -365,6 +380,8 @@ function wireUI() {
   el("achClose").onclick = () => el("achievements").classList.add("hidden");
   // coach "show me": pulse the palette card / editor the fix refers to
   el("hud").addEventListener("click", (e) => {
+    const dismiss = e.target.closest(".coach-dismiss");
+    if (dismiss) { coachMute = dismiss.dataset.text.replace(/&quot;/g, '"'); pinnedCoach = null; return; }
     const learn = e.target.closest(".coach-learn");
     if (learn) {
       G.start_walkthrough(learn.dataset.wt); lastTut = "";
@@ -477,6 +494,18 @@ function frame(now) {
   }
   lastLeaks = s.leaks;
   if (over && running) { running = false; el("startBtn").textContent = "▶ Start"; }
+
+  // between-level pause: a wave just cleared. Halt so the player can adjust;
+  // endless mode counts down and resumes on its own, otherwise wait for Start.
+  if (!s.over && s.wave > lastWave && !levelBreak) {
+    const cleared = lastWave; lastWave = s.wave;
+    running = false; G.set_paused(true); el("startBtn").textContent = `▶ Start level ${s.wave}`;
+    levelBreak = { cleared, next: s.wave, count: endless ? 3.0 : null };
+  }
+  if (levelBreak && levelBreak.count !== null) {   // endless countdown
+    levelBreak.count -= dt;
+    if (levelBreak.count <= 0) resumeFromBreak();
+  }
   render(s);
   if ((selectedGun || deviceMode) && !buildMode) drawPlacePreview(s);
   if (drag && drag.moved) drawDragGhost();
@@ -545,19 +574,51 @@ function drawPlacePreview(s) {
   ctx.beginPath(); ctx.arc(sx(best.x), sy(best.y), 15, 0, 7); ctx.stroke(); ctx.setLineDash([]);
 }
 
+function resumeFromBreak() {
+  levelBreak = null;
+  running = true; G.begin();
+  el("startBtn").textContent = "❚❚ Pause";
+}
+
 function renderOverlay(s) {
   const box = el("boardOverlay");
-  if (!s.over) { box.classList.add("hidden"); return; }
-  box.classList.remove("hidden");
-  let html = `<h2 class="${s.won ? "won" : "lost"}">${s.won ? "PIPELINE HELD ✓" : "PIPELINE OVERWHELMED ✕"}</h2>`;
-  html += `<div class="ov-sub">waves cleared ${Math.max(0, s.wave - 1)} · leaks ${s.leaks}/${s.max_leaks}</div>`;
-  if (s.debrief) {
-    html += `<div class="ov-cause">${s.debrief.cause}</div>`;
-    html += `<div class="ov-lines">${s.debrief.lines.slice(0, 6).map((l) => `<div>• ${l}</div>`).join("")}</div>`;
+  if (s.over) {
+    box.classList.remove("hidden");
+    let html = `<h2 class="${s.won ? "won" : "lost"}">${s.won ? "PIPELINE HELD ✓" : "PIPELINE OVERWHELMED ✕"}</h2>`;
+    html += `<div class="ov-sub">waves cleared ${Math.max(0, s.wave - 1)} · leaks ${s.leaks}/${s.max_leaks}</div>`;
+    if (s.debrief) {
+      html += `<div class="ov-cause">${s.debrief.cause}</div>`;
+      html += `<div class="ov-lines">${s.debrief.lines.slice(0, 6).map((l) => `<div>• ${l}</div>`).join("")}</div>`;
+    }
+    html += `<button id="ovRetry" class="primary">Retry</button>`;
+    box.innerHTML = html;
+    el("ovRetry").onclick = () => { box.classList.add("hidden"); newGame(); };
+    return;
   }
-  html += `<button id="ovRetry" class="primary">Retry</button>`;
-  box.innerHTML = html;
-  el("ovRetry").onclick = () => { box.classList.add("hidden"); newGame(); };
+  if (levelBreak) { renderLevelBreak(s); return; }
+  box.classList.add("hidden");
+}
+
+function renderLevelBreak(s) {
+  const box = el("boardOverlay");
+  box.classList.remove("hidden");
+  const covered = new Set();
+  s.turrets.forEach((t) => t.accepts.forEach((k) => covered.add(k)));
+  const up = s.upcoming.length ? s.upcoming.map((u) => {
+    if (u.kind === "raw") return `<span style="color:var(--muted)">raw×${u.n}</span>`;
+    const ok = covered.has(u.kind);
+    return `<span style="color:${ok ? "var(--phos)" : "var(--danger)"}">${ok ? "✓" : "✗"} ${u.kind}×${u.n}</span>`;
+  }).join("  ") : "—";
+  const action = levelBreak.count !== null
+    ? `<div class="ov-count">next level in ${Math.ceil(levelBreak.count)}…</div>
+       <button id="ovStart" class="primary">Start now</button>`
+    : `<button id="ovStart" class="primary">▶ Start level ${levelBreak.next}</button>`;
+  box.innerHTML = `
+    <h2 class="won">LEVEL ${levelBreak.cleared} CLEARED ✓</h2>
+    <div class="ov-sub">credits ${s.credits} · leaks ${s.leaks}/${s.max_leaks} · adjust your build, then continue</div>
+    <div class="ov-incoming">incoming level ${levelBreak.next}: ${up}</div>
+    ${action}`;
+  el("ovStart").onclick = resumeFromBreak;
 }
 
 // board hover tooltips (node / turret) — a key training aid
@@ -1149,9 +1210,25 @@ function findCoachTarget(fix) {
   return null;
 }
 
+// keep the most important problem on screen even after the pressure eases, so a
+// transient spike's advice doesn't vanish before it can be read
+function updateCoachPin(s) {
+  const top = s.coach && s.coach.length ? s.coach[0] : null;
+  if (top && (top.level === "danger" || top.level === "warn")) {
+    if (top.text !== coachMute) { pinnedCoach = Object.assign({}, top); coachMute = ""; }
+  } else if (top && top.level === "ok") {
+    pinnedCoach = null; coachMute = "";      // genuinely resolved — clear the pin
+  }
+  // otherwise (tip / no hint): keep whatever is pinned so it persists
+}
+
 function coachHtml(s) {
-  if (!s.coach || !s.coach.length) return "";
-  const h = s.coach[0];
+  updateCoachPin(s);
+  const live = s.coach && s.coach.length ? s.coach[0] : null;
+  // prefer the pinned problem; fall back to the live hint
+  const h = pinnedCoach || live;
+  const pinned = !!pinnedCoach;
+  if (!h) return "";
   const lc = { danger: "var(--danger)", warn: "var(--amber)", tip: "var(--phos)", ok: "var(--phos)" }[h.level] || "var(--ink)";
   if (h.level === "ok") return `<div class="coach ok">COACH: ${h.text}</div>`;
   const target = findCoachTarget(h.fix);
@@ -1162,12 +1239,17 @@ function coachHtml(s) {
   const learnBtn = wt && !wtDone.has(wt.id)
     ? `<button class="coach-learn" data-wt="${wt.id}">🎓 learn: ${wt.title}</button>`
     : "";
-  return `<div class="coach" style="border-color:${lc}">
-    <div class="coach-head" style="color:${lc}">COACH ▸ ${h.text}</div>
+  const pinTag = pinned && (!live || live.text !== h.text)
+    ? `<span class="coach-pinned" title="Still showing this until you fix or dismiss it">📌 pinned</span>` : "";
+  return `<div class="coach ${pinned ? "is-pinned" : ""}" style="border-color:${lc}">
+    <div class="coach-head" style="color:${lc}">
+      <span>COACH ▸ ${h.text}</span>
+      ${pinned ? `<button class="coach-dismiss" data-text="${escapeAttr(h.text)}" title="Dismiss">✕</button>` : ""}
+    </div>
     ${h.why ? `<div class="coach-line"><b>WHY</b> ${h.why}</div>` : ""}
     ${h.fix ? `<div class="coach-line coach-fix"><b>FIX</b> ${h.fix}</div>` : ""}
     ${h.concept ? `<div class="coach-concept">concept: ${h.concept}</div>` : ""}
-    <div class="coach-foot">${showBtn}${learnBtn}</div>
+    <div class="coach-foot">${pinTag}${showBtn}${learnBtn}</div>
   </div>`;
 }
 

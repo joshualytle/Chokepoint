@@ -204,6 +204,8 @@ button.gun.mod.sel .gun-name { color: var(--amber); }
 .board-overlay .ov-sub { color: var(--muted); }
 .board-overlay .ov-cause { color: var(--ink); margin-top: 8px; max-width: 620px; }
 .board-overlay .ov-lines { color: var(--danger); margin: 8px 0; text-align: left; max-width: 620px; line-height: 1.7; }
+.board-overlay .ov-incoming { color: var(--ink); margin: 6px 0; max-width: 620px; }
+.board-overlay .ov-count { color: var(--amber); font-size: 15px; margin-top: 6px; }
 .board-overlay button { margin-top: 8px; background: var(--phos-dim); }
 
 /* ------------------------------------------------- guided tutorial card */
@@ -352,7 +354,11 @@ table.kinds tr.gap td { color: var(--danger); }
   border-left-width: 4px; border-radius: var(--r-s); background: var(--panel2);
 }
 .coach.ok { border: 0; padding: 10px 0 0; background: none; color: var(--phos); }
-.coach-head { font-weight: bold; margin-bottom: 6px; }
+.coach.is-pinned { box-shadow: 0 0 0 1px rgba(229, 85, 110, 0.3); }
+.coach-head { font-weight: bold; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.coach-dismiss { flex-shrink: 0; padding: 1px 7px; font-size: 12px; color: var(--muted); border: 1px solid var(--grid); border-radius: 5px; }
+.coach-dismiss:hover { color: var(--ink); border-color: var(--muted); }
+.coach-pinned { color: var(--muted); font-size: 11px; margin-right: auto; }
 .coach-line { color: var(--ink); margin-top: 3px; }
 .coach-line b { color: var(--muted); font-weight: normal; margin-right: 4px; }
 .coach-fix b { color: var(--amber); }

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import traceback
 
 from chokepoint.arsenal import MODULE_LIBRARY, Module, Turret, make_gun
@@ -258,7 +259,10 @@ def place_at(x: float, y: float) -> str:
                            "reason": f"need {gun.cost}cr for {gun.name} (you have {bank.balance})"})
     turret = _editor.place(x, y)
     if turret is not None:
-        turret.x, turret.y = _snap_to_node(x, y)   # sit on its node so it's clearly linked
+        # snap a fresh turret onto its node line (clear "it's linked"), then nudge
+        # it off any turret already there so placements can't stack on top
+        nx, ny = _snap_to_node(x, y)
+        turret.x, turret.y = _avoid_overlap(nx, ny, ignore=turret)
         _record(pre)
         _tutorial.signal("place")
     _sync()
@@ -274,20 +278,47 @@ def _snap_to_node(x: float, y: float) -> tuple[float, float]:
     return nx, ny + 24
 
 
+_MIN_SEP = 30.0                              # closest two placed items may sit (px)
+
+
+def _avoid_overlap(x: float, y: float, ignore: object = None) -> tuple[float, float]:
+    """Return (x, y) nudged so it doesn't sit on top of another placed item.
+
+    Spirals outward from the wanted spot until it finds clear space — that's the
+    "boundary" that stops turrets stacking, while still honouring where you aimed.
+    """
+    assert _editor is not None
+    others = [(o.x, o.y) for o in _editor.turrets if o is not ignore]
+    others += [(g.x, g.y) for g in _editor.gates if g is not ignore]
+    others += [(lm.x, lm.y) for lm in _editor.limiters if lm is not ignore]
+    for r in range(0, 180, 6):               # rings, expanding from the wanted spot
+        for deg in range(0, 360, 30):        # points around each ring
+            nx = x + r * math.cos(math.radians(deg))
+            ny = y + r * math.sin(math.radians(deg))
+            if all((nx - ox) ** 2 + (ny - oy) ** 2 >= _MIN_SEP ** 2 for ox, oy in others):
+                return nx, ny
+    return x, y
+
+
 def move_at(fx: float, fy: float, tx: float, ty: float) -> str:
-    """Drag a placed turret / gate / limiter from (fx,fy) to (tx,ty)."""
+    """Drag a placed turret / gate / limiter to (tx,ty) — free positioning.
+
+    Turrets are NOT re-snapped to a node: you place them where you want and the
+    dashed tether still shows which node each one serves (it drains the nearest).
+    Overlap is still avoided so items can't be dropped on top of each other.
+    """
     assert _editor is not None
     pre = _state_snapshot()
     t = _editor.turret_at(fx, fy)
     if t is not None:
-        t.x, t.y = _snap_to_node(tx, ty)
+        t.x, t.y = _avoid_overlap(tx, ty, ignore=t)
     else:
         g = _editor.gate_at(fx, fy)
         lm = None if g is not None else _editor.limiter_at(fx, fy)
         if g is not None:
-            g.x, g.y = tx, ty
+            g.x, g.y = _avoid_overlap(tx, ty, ignore=g)
         elif lm is not None:
-            lm.x, lm.y = tx, ty
+            lm.x, lm.y = _avoid_overlap(tx, ty, ignore=lm)
         else:
             return json.dumps({"ok": False})
     _record(pre)

@@ -26,3 +26,10 @@ chokepoint_highscore.txt
 
 # generated Pyodide bundle (built by serve_native.py)
 web/chokepoint.zip
+
+# Local secret files (SEC-006): ignored BEFORE one can exist, so a stray
+# `git add -A` can never stage it. History is forever; this is the cheap
+# control that keeps a credential out of it. Templates stay committable.
+.env
+.env.*
+!.env.example

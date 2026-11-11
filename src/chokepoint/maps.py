@@ -125,9 +125,13 @@ class Graph:
         must still be able to reach the sink (there's always a path for alerts)."""
         if src not in self.adj or dst not in self.adj[src]:
             return False
-        self.adj[src].remove(dst)
+        # Remember where dst sat: branch order matters (index 0 takes ungated
+        # traffic, and gate routes are branch indices), so a revert must put it
+        # back in the same slot, not at the end.
+        i = self.adj[src].index(dst)
+        del self.adj[src][i]
         if not self.reachable(self.source, self.sink):
-            self.adj[src].append(dst)   # revert — this was the only path through
+            self.adj[src].insert(i, dst)   # revert — this was the only path through
             return False
         return True
 
@@ -136,17 +140,30 @@ class Graph:
         neither can a node whose removal would cut the source→sink path."""
         if nid in (self.source, self.sink) or nid not in self.nodes:
             return False
-        # tentatively remove, then require the pipeline to still connect
+        # tentatively remove, then require the pipeline to still connect.
+        # A refused removal must leave the graph exactly as it was, order
+        # included, so remember each position before deleting anything.
+        node_order = list(self.nodes)
+        adj_order = list(self.adj)
         node = self.nodes.pop(nid)
         outs = self.adj.pop(nid, [])
-        ins = [s for s, dsts in self.adj.items() if nid in dsts]
-        for s in ins:
-            self.adj[s].remove(nid)
+        ins = [(s, dsts.index(nid)) for s, dsts in self.adj.items() if nid in dsts]
+        for s, i in ins:
+            del self.adj[s][i]
         if not self.reachable(self.source, self.sink):
-            self.nodes[nid] = node       # restore — it was the only path
+            # restore — it was the only path
+            for s, i in ins:
+                self.adj[s].insert(i, nid)   # same branch slot as before
+            # Dicts keep insertion order, so re-adding nid would put it last.
+            # Rebuild both dicts in place in their original key order.
+            self.nodes[nid] = node
             self.adj[nid] = outs
-            for s in ins:
-                self.adj[s].append(nid)
+            nodes = {k: self.nodes[k] for k in node_order}
+            adj = {k: self.adj[k] for k in adj_order}
+            self.nodes.clear()
+            self.nodes.update(nodes)
+            self.adj.clear()
+            self.adj.update(adj)
             return False
         return True
 

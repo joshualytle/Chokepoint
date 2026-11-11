@@ -30,6 +30,10 @@ minor versions may still move quickly.
 - Retired the older pygame-in-browser (pygbag) build in favor of the native-web
   app.
 
+### Fixed
+- A refused edge/node removal no longer reorders a fork's branches (which
+  changed where ungated packets and gate routes went).
+
 ### Notes
 - The desktop build (`python -m chokepoint`) is unchanged and remains the
   reference experience.

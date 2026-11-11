@@ -85,6 +85,18 @@ def test_generator_frame_walk_escape_is_blocked():
         safe_exec(escape, _API)
 
 
+@pytest.mark.parametrize("bad", [
+    # an allowed module, but the NAME imported from it is the module's real builtins
+    "from chokepoint.arsenal import __builtins__ as B\n",
+    "from math import __loader__\n",
+    "from chokepoint.arsenal import _private\n",
+    "from math import *\n",                          # star-import hides what it binds
+])
+def test_rejects_underscore_and_star_imported_names(bad):
+    with pytest.raises(SafetyError):
+        check_code(bad)
+
+
 def test_safe_exec_blocks_import_even_if_ast_missed_it():
     # belt-and-suspenders: the guarded __import__ also refuses non-allowlisted modules
     with pytest.raises(SafetyError):

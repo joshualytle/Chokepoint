@@ -102,6 +102,12 @@ def check_code(src: str) -> None:
                 raise SafetyError("relative imports are not allowed")
             if node.module not in ALLOWED_IMPORTS:
                 raise SafetyError(f"import from {node.module!r} is not allowed")
+            # the module may be allowed while the NAME is not: every module has a
+            # __builtins__ (the real ones, with open/__import__), so check each name.
+            # "*" is refused because it binds names we can't see from here.
+            for alias in node.names:
+                if alias.name == "*" or alias.name.startswith("_"):
+                    raise SafetyError(f"importing {alias.name!r} is not allowed")
         elif isinstance(node, ast.Attribute):
             if _forbidden_attribute(node.attr):
                 raise SafetyError(f"access to attribute {node.attr!r} is not allowed")

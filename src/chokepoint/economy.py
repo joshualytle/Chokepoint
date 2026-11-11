@@ -29,12 +29,22 @@ class Bank:
         return cost <= self.balance
 
     def spend(self, cost: int) -> bool:
-        """Deduct ``cost`` if affordable. Returns False and changes nothing if not."""
-        if cost > self.balance:
+        """Deduct ``cost`` if affordable. Returns False and changes nothing if not.
+
+        A negative cost is refused too: costs are plain fields player code can
+        set, and "spending" -500 would otherwise *add* 500 credits.
+        """
+        if cost < 0 or cost > self.balance:
             return False
         self.balance -= cost
         return True
 
     def earn(self, amount: int) -> None:
-        """Add credits (wave income, or a refund when a turret is removed)."""
+        """Add credits (wave income, or a refund when a turret is removed).
+
+        A negative amount is ignored (no-op), so refunding a negative-cost
+        device can't drive the balance below zero.
+        """
+        if amount < 0:
+            return
         self.balance += amount

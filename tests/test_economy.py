@@ -2,6 +2,8 @@
 
 from chokepoint.arsenal import gun_cost, make_gun
 from chokepoint.economy import Bank
+from chokepoint.editor import ArsenalEditor
+from chokepoint.gates import Gate
 from chokepoint.maps import MAPS
 from chokepoint.simulation import (
     WAVE_INCOME_BASE,
@@ -21,6 +23,28 @@ def test_spend_rejected_when_too_expensive_and_leaves_balance():
     bank = Bank(20)
     assert bank.spend(50) is False
     assert bank.balance == 20  # unchanged on failure
+
+
+def test_negative_amounts_cannot_mint_or_drain_credits():
+    # a negative cost would *add* credits; a negative refund would drain them
+    bank = Bank(100)
+    assert bank.spend(-500) is False
+    assert bank.balance == 100
+    bank.earn(-50)
+    assert bank.balance == 100
+
+
+def test_negative_cost_gate_is_not_bought_or_refunded():
+    bank = Bank(250)
+    ed = ArsenalEditor(set(), bank=bank)
+    ed.seed_purchase_gates([Gate(0, 0, cost=-1000)])  # e.g. from build_gates()
+    assert bank.balance == 250
+    assert ed.gates == []
+    bank2 = Bank(0)
+    ed2 = ArsenalEditor(set(), bank=bank2)
+    ed2.gates = [Gate(0, 0, cost=-50)]
+    ed2.remove_gate_at(0, 0)
+    assert bank2.balance == 0              # never negative
 
 
 def test_can_afford_boundary():

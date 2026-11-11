@@ -39,6 +39,8 @@ minor versions may still move quickly.
   turret past its static fire rate.
 - A decoded `raw` alert now counts as spawned under its real kind (in both the
   stats table and telemetry), so per-kind spawned/handled/leaked add up.
+- The credit bank refuses negative amounts, so a device with a negative cost
+  can no longer mint credits or drive the balance below zero on refund.
 
 ### Notes
 - The desktop build (`python -m chokepoint`) is unchanged and remains the

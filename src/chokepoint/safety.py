@@ -47,6 +47,10 @@ _SAFE_BUILTIN_NAMES = frozenset({
     "abs", "all", "any", "bool", "dict", "divmod", "enumerate", "filter", "float",
     "int", "isinstance", "len", "list", "map", "max", "min", "print", "range",
     "reversed", "round", "set", "frozenset", "sorted", "str", "sum", "tuple", "zip",
+    # the common exception classes, so `try: ... except IndexError:` and
+    # `raise ValueError(...)` work (without them the name itself is a NameError)
+    "Exception", "ValueError", "TypeError", "KeyError", "IndexError",
+    "ZeroDivisionError", "AttributeError", "StopIteration",
 })
 
 # names that must never appear at all — fast, explicit rejection with a clear message
@@ -74,8 +78,16 @@ def _forbidden_attribute(attr: str) -> bool:
     return attr in _FORBIDDEN_ATTRS or attr.startswith(_FORBIDDEN_ATTR_PREFIXES)
 
 
+# `from __future__ import annotations` is a switch for the compiler, not a real
+# import of anything useful - and the game's own exported loadouts start with it.
+# Only that from-form is allowed (check_code still refuses "_" names and "*"), but
+# the statement also runs at exec time, so the guarded import must let it through.
+_FUTURE = "__future__"
+
+
 def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):  # noqa: A002
-    if level != 0 or name not in ALLOWED_IMPORTS:
+    allowed = name in ALLOWED_IMPORTS or (name == _FUTURE and bool(fromlist))
+    if level != 0 or not allowed:
         raise SafetyError(f"import of {name!r} is not allowed")
     return importlib.import_module(name)
 
@@ -100,7 +112,7 @@ def check_code(src: str) -> None:
         elif isinstance(node, ast.ImportFrom):
             if node.level != 0:
                 raise SafetyError("relative imports are not allowed")
-            if node.module not in ALLOWED_IMPORTS:
+            if node.module not in ALLOWED_IMPORTS and node.module != _FUTURE:
                 raise SafetyError(f"import from {node.module!r} is not allowed")
             # the module may be allowed while the NAME is not: every module has a
             # __builtins__ (the real ones, with open/__import__), so check each name.

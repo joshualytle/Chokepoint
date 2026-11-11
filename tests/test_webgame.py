@@ -11,6 +11,7 @@ import pytest
 import webgame as wg
 
 from chokepoint.arsenal import MODULE_LIBRARY
+from chokepoint.safety import check_code
 
 
 def fresh(map_name="trunk", difficulty="easy"):
@@ -168,6 +169,30 @@ def test_failed_load_reports_the_line_in_player_code():
     r = json.loads(wg.load_loadout(
         _ONE_TURRET + "def build_parsers(unlocked, slots):\n    return [1 / 0]\n"))
     assert r["ok"] is False and r["line"] == 4 and "ZeroDivisionError" in r["error"]
+
+
+def test_editor_export_loads_through_the_bridge():
+    # round trip: what the game itself exports must pass its own sandbox
+    fresh()
+    wg.select_gun("sieve")
+    assert json.loads(wg.place_at(370, 180))["ok"]
+    exported = wg._editor.to_python()
+    assert exported.startswith('"""') and "from __future__ import annotations" in exported
+    check_code(exported)
+    fresh()
+    r = json.loads(wg.load_loadout(exported))
+    assert r["ok"] and r["turrets"] == 1
+
+
+def test_loadout_can_catch_an_index_error():
+    fresh()
+    r = json.loads(wg.load_loadout(
+        "def build_loadout(unlocked, slots):\n"
+        "    try:\n"
+        "        return [Turret(*slots[99], gun=make_gun('sieve'))]\n"
+        "    except IndexError:\n"
+        "        return []\n"))
+    assert r["ok"] and r["turrets"] == 0
 
 
 @pytest.mark.parametrize("mutate", [

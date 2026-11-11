@@ -97,6 +97,37 @@ def test_rejects_underscore_and_star_imported_names(bad):
         check_code(bad)
 
 
+def test_future_import_is_allowed_and_runs():
+    # the editor's exporter and the shipped loadout.py both start with this line
+    ns = safe_exec("from __future__ import annotations\n" + GOOD, _API)
+    assert len(ns["build_loadout"](set(), [(0, 0)])) == 1
+
+
+@pytest.mark.parametrize("bad", [
+    "import __future__\n",                           # only the from-form is a compiler switch
+    "from __future__ import *\n",
+])
+def test_future_module_itself_stays_blocked(bad):
+    with pytest.raises(SafetyError):
+        check_code(bad)
+
+
+def test_common_exceptions_can_be_caught_and_raised():
+    ns = safe_exec(
+        "def first(items):\n"
+        "    try:\n"
+        "        return items[0]\n"
+        "    except IndexError:\n"
+        "        return None\n"
+        "def check(n):\n"
+        "    if n < 0:\n"
+        "        raise ValueError('n must be >= 0')\n"
+        "    return n\n")
+    assert ns["first"]([]) is None and ns["first"]([7]) == 7
+    with pytest.raises(ValueError):
+        ns["check"](-1)
+
+
 def test_safe_exec_blocks_import_even_if_ast_missed_it():
     # belt-and-suspenders: the guarded __import__ also refuses non-allowlisted modules
     with pytest.raises(SafetyError):

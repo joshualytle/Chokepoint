@@ -7,7 +7,11 @@ and the placement/economy/resume behaviors that don't live in the pure core.
 
 import json
 
+import pytest
 import webgame as wg
+
+from chokepoint.arsenal import MODULE_LIBRARY
+from chokepoint.safety import check_code
 
 
 def fresh(map_name="trunk", difficulty="easy"):
@@ -127,6 +131,99 @@ def test_load_loadout_deploys_and_reports_error_line():
         "def build_loadout(unlocked, slots):\n"
         "    return [Turret(*slots[999], gun=make_gun('sieve'))]\n"))
     assert bad["ok"] is False and bad["line"] == 2
+
+
+_ONE_TURRET = ("def build_loadout(unlocked, slots):\n"
+               "    return [Turret(*slots[0], gun=make_gun('sieve'))]\n")
+
+
+@pytest.mark.parametrize("src", [
+    _ONE_TURRET + "def build_parsers(unlocked, slots):\n    return [1 / 0]\n",
+    _ONE_TURRET + "def build_gates(unlocked, slots):\n    raise ValueError('oops')\n",
+    _ONE_TURRET + "def build_limiters(unlocked, slots):\n    return None\n",
+    _ONE_TURRET + "def build_gates(unlocked, slots):\n    return [Gate(0, 0, cost='lots')]\n",
+    "def build_loadout(unlocked, slots):\n    turrets = []\n",       # forgot to return
+], ids=["parsers-raise", "gates-raise", "limiters-none", "bad-gate-cost", "loadout-none"])
+def test_failed_load_leaves_the_build_untouched(src):
+    # a loadout that blows up part-way must not spend credits, swap the editor, or
+    # leave the editor and World disagreeing - it reports the error like any other
+    fresh()
+    wg.select_gun("scatter")
+    assert json.loads(wg.place_at(370, 180))["ok"]
+    before_balance = wg._world.bank.balance
+    before_editor = [(t.gun.name, t.x, t.y) for t in wg._editor.turrets]
+    before_world = [(t.gun.name, t.x, t.y) for t in wg._world.turrets]
+    before_undo = len(wg._undo)
+
+    r = json.loads(wg.load_loadout(src))   # must return JSON, not raise
+
+    assert r["ok"] is False and r["error"]
+    assert wg._world.bank.balance == before_balance
+    assert [(t.gun.name, t.x, t.y) for t in wg._editor.turrets] == before_editor
+    assert [(t.gun.name, t.x, t.y) for t in wg._world.turrets] == before_world
+    assert len(wg._undo) == before_undo
+
+
+def test_failed_load_reports_the_line_in_player_code():
+    fresh()
+    r = json.loads(wg.load_loadout(
+        _ONE_TURRET + "def build_parsers(unlocked, slots):\n    return [1 / 0]\n"))
+    assert r["ok"] is False and r["line"] == 4 and "ZeroDivisionError" in r["error"]
+
+
+def test_editor_export_loads_through_the_bridge():
+    # round trip: what the game itself exports must pass its own sandbox
+    fresh()
+    wg.select_gun("sieve")
+    assert json.loads(wg.place_at(370, 180))["ok"]
+    exported = wg._editor.to_python()
+    assert exported.startswith('"""') and "from __future__ import annotations" in exported
+    check_code(exported)
+    fresh()
+    r = json.loads(wg.load_loadout(exported))
+    assert r["ok"] and r["turrets"] == 1
+
+
+def test_loadout_can_catch_an_index_error():
+    fresh()
+    r = json.loads(wg.load_loadout(
+        "def build_loadout(unlocked, slots):\n"
+        "    try:\n"
+        "        return [Turret(*slots[99], gun=make_gun('sieve'))]\n"
+        "    except IndexError:\n"
+        "        return []\n"))
+    assert r["ok"] and r["turrets"] == 0
+
+
+@pytest.mark.parametrize("mutate", [
+    "MODULE_LIBRARY.clear()",
+    "MODULE_LIBRARY['amp'] = None",
+    "MODULE_LIBRARY.pop('amp')",
+])
+def test_loadout_cannot_mutate_the_module_registry(mutate):
+    # player code gets a read-only view: a bad loadout must not break the palette
+    # (or anyone's later loadouts) for the rest of the session
+    fresh()
+    before = dict(MODULE_LIBRARY)
+    try:
+        r = json.loads(wg.load_loadout(f"{mutate}\ndef build_loadout(u, s):\n    return []\n"))
+        assert r["ok"] is False
+        assert MODULE_LIBRARY == before
+    finally:                       # if it did get through, don't break the other tests
+        MODULE_LIBRARY.clear()
+        MODULE_LIBRARY.update(before)
+
+
+def test_loadout_can_still_read_the_module_registry():
+    fresh()
+    wg.grant_sandbox_credits()
+    r = json.loads(wg.load_loadout(
+        "def build_loadout(unlocked, slots):\n"
+        "    gun = make_gun('sieve')\n"
+        "    gun.attach(MODULE_LIBRARY['amp'])\n"
+        "    names = sorted(MODULE_LIBRARY)\n"
+        "    return [Turret(*slots[0], gun=gun)] if 'amp' in names else []\n"))
+    assert r["ok"] and r["turrets"] == 1
 
 
 # ---- training surfaces ---- #

@@ -8,7 +8,8 @@ browser. So all player code goes through here first.
 
 Two layers of defense:
   * ``check_code`` — an AST allowlist: reject imports outside a tiny set, reject
-    dunder attribute access (``__class__``/``__globals__``/``__subclasses__`` …),
+    underscore and introspection attribute access (``__class__``, ``gi_frame``,
+    ``f_back``, ``co_consts`` …) and ``str.format``,
     reject dangerous names (eval/exec/open/__import__ …), and reject class defs
     and ``while`` loops (a loadout needs neither, and ``while`` can hang the tab).
   * ``safe_exec`` — exec with a curated, minimal ``__builtins__`` plus a guarded
@@ -46,6 +47,10 @@ _SAFE_BUILTIN_NAMES = frozenset({
     "abs", "all", "any", "bool", "dict", "divmod", "enumerate", "filter", "float",
     "int", "isinstance", "len", "list", "map", "max", "min", "print", "range",
     "reversed", "round", "set", "frozenset", "sorted", "str", "sum", "tuple", "zip",
+    # the common exception classes, so `try: ... except IndexError:` and
+    # `raise ValueError(...)` work (without them the name itself is a NameError)
+    "Exception", "ValueError", "TypeError", "KeyError", "IndexError",
+    "ZeroDivisionError", "AttributeError", "StopIteration",
 })
 
 # names that must never appear at all — fast, explicit rejection with a clear message
@@ -56,8 +61,33 @@ _FORBIDDEN_NAMES = frozenset({
 })
 
 
+# Attribute prefixes of Python's introspection objects: generator/coroutine/async-gen
+# (gi_/cr_/ag_), frames (f_), tracebacks (tb_) and code objects (co_). They are not
+# dunders, but gen.gi_frame.f_back.f_builtins walks from your own frame out to the
+# REAL builtins (open, __import__), so none of them may be touched.
+_FORBIDDEN_ATTR_PREFIXES = ("_", "gi_", "cr_", "ag_", "f_", "tb_", "co_")
+
+# str.format / format_map can read attributes from inside the format string itself
+# ("{0.__class__}".format(x)) - text the AST check never sees - so ban them outright.
+# f-strings are fine: their {...} parts are real code that this checker does inspect.
+_FORBIDDEN_ATTRS = frozenset({"format", "format_map"})
+
+
+def _forbidden_attribute(attr: str) -> bool:
+    # str.startswith accepts a tuple and is True if ANY of the prefixes match
+    return attr in _FORBIDDEN_ATTRS or attr.startswith(_FORBIDDEN_ATTR_PREFIXES)
+
+
+# `from __future__ import annotations` is a switch for the compiler, not a real
+# import of anything useful - and the game's own exported loadouts start with it.
+# Only that from-form is allowed (check_code still refuses "_" names and "*"), but
+# the statement also runs at exec time, so the guarded import must let it through.
+_FUTURE = "__future__"
+
+
 def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):  # noqa: A002
-    if level != 0 or name not in ALLOWED_IMPORTS:
+    allowed = name in ALLOWED_IMPORTS or (name == _FUTURE and bool(fromlist))
+    if level != 0 or not allowed:
         raise SafetyError(f"import of {name!r} is not allowed")
     return importlib.import_module(name)
 
@@ -82,11 +112,17 @@ def check_code(src: str) -> None:
         elif isinstance(node, ast.ImportFrom):
             if node.level != 0:
                 raise SafetyError("relative imports are not allowed")
-            if node.module not in ALLOWED_IMPORTS:
+            if node.module not in ALLOWED_IMPORTS and node.module != _FUTURE:
                 raise SafetyError(f"import from {node.module!r} is not allowed")
+            # the module may be allowed while the NAME is not: every module has a
+            # __builtins__ (the real ones, with open/__import__), so check each name.
+            # "*" is refused because it binds names we can't see from here.
+            for alias in node.names:
+                if alias.name == "*" or alias.name.startswith("_"):
+                    raise SafetyError(f"importing {alias.name!r} is not allowed")
         elif isinstance(node, ast.Attribute):
-            if node.attr.startswith("__") and node.attr.endswith("__"):
-                raise SafetyError(f"access to dunder attribute {node.attr!r} is not allowed")
+            if _forbidden_attribute(node.attr):
+                raise SafetyError(f"access to attribute {node.attr!r} is not allowed")
         elif isinstance(node, ast.Name) and node.id in _FORBIDDEN_NAMES:
             raise SafetyError(f"use of {node.id!r} is not allowed")
         elif isinstance(node, ast.ClassDef):

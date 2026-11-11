@@ -20,6 +20,7 @@ import copy
 import json
 import math
 import traceback
+from types import MappingProxyType
 
 from chokepoint.arsenal import MODULE_LIBRARY, Module, Turret, make_gun
 from chokepoint.editor import ArsenalEditor
@@ -36,10 +37,13 @@ from chokepoint.safety import SafetyError, safe_exec
 from chokepoint.simulation import DWELL_GRACE, MAX_LEAK, QUEUE_CAP, START_HEALTH, World
 from chokepoint.tutorial import Step, Tutorial
 
-# the game objects a loadout may use, injected so no imports are even required
+# the game objects a loadout may use, injected so no imports are even required.
+# MappingProxyType is a read-only window onto a dict: lookups work, but .clear(),
+# .pop() and item assignment raise, so player code can't wreck the shared registry.
 _LOADOUT_API = {
     "Turret": Turret, "make_gun": make_gun, "Module": Module,
-    "MODULE_LIBRARY": MODULE_LIBRARY, "Parser": Parser, "Gate": Gate, "Limiter": Limiter,
+    "MODULE_LIBRARY": MappingProxyType(MODULE_LIBRARY), "Parser": Parser, "Gate": Gate,
+    "Limiter": Limiter,
 }
 
 _world: World | None = None
@@ -126,45 +130,52 @@ def undo() -> str:
 def load_loadout(src: str) -> str:
     """Exec the player's build_loadout (sandboxed) and deploy what it returns."""
     global _editor
-    assert _world is not None
+    assert _world is not None and _editor is not None
     pre = _state_snapshot()
+    # Everything that runs player code or spends credits stays inside this try. The
+    # new editor is built in a local variable and only swapped in once it all worked;
+    # on any error we roll back to `pre` (credits, slots, parsers) - all or nothing.
     try:
         ns = safe_exec(src, _LOADOUT_API)   # sandboxed: no arbitrary imports / escapes
         if "build_loadout" not in ns:
             raise ValueError("define build_loadout(unlocked, slots)")
-        turrets = ns["build_loadout"](_world.unlocked(), _world.map.slots)
+        unlocked, slots = _world.unlocked(), _world.map.slots
+        turrets = ns["build_loadout"](unlocked, slots)
+        if turrets is None:
+            raise TypeError("build_loadout returned None - did you forget `return turrets`?")
+        editor = ArsenalEditor(unlocked, bank=_world.bank)
+        dropped = editor.seed_purchase(turrets)
+        # optional device builders (gates / limiters / parsers), like the desktop loadout
+        build_gates = ns.get("build_gates")
+        if callable(build_gates):
+            editor.seed_purchase_gates(build_gates(unlocked, slots))
+        build_limiters = ns.get("build_limiters")
+        if callable(build_limiters):
+            editor.seed_purchase_limiters(build_limiters(unlocked, slots))
+        parsers: list[Parser] = []
+        build_parsers = ns.get("build_parsers")
+        if callable(build_parsers):
+            for ps in build_parsers(unlocked, slots):
+                if _world.bank.spend(ps.cost):
+                    parsers.append(ps)
     except SafetyError as err:
+        _restore(pre)
         # a syntax error inside the sandbox check carries the offending line
         line = getattr(err.__cause__, "lineno", None)
         return json.dumps({"ok": False, "error": f"blocked: {err}", "line": line})
     except Exception as err:  # report author errors to the editor, never crash
+        _restore(pre)
         line = None
         for fr in traceback.extract_tb(err.__traceback__):
             if fr.filename == "<loadout>":
                 line = fr.lineno          # deepest frame in the player's code
         return json.dumps({"ok": False, "error": f"{type(err).__name__}: {err}", "line": line})
-    _editor = ArsenalEditor(_world.unlocked(), bank=_world.bank)
-    dropped = _editor.seed_purchase(turrets)
-    # optional device builders (gates / limiters / parsers), like the desktop loadout
-    unlocked, slots = _world.unlocked(), _world.map.slots
-    build_gates = ns.get("build_gates")
-    if callable(build_gates):
-        _editor.seed_purchase_gates(build_gates(unlocked, slots))
-    build_limiters = ns.get("build_limiters")
-    if callable(build_limiters):
-        _editor.seed_purchase_limiters(build_limiters(unlocked, slots))
-    parsers = []
-    build_parsers = ns.get("build_parsers")
-    if callable(build_parsers):
-        for ps in build_parsers(unlocked, slots):
-            if _world.bank.spend(ps.cost):
-                parsers.append(ps)
+    _editor = editor
     _world.set_parsers(parsers)
     _record(pre)
     _sync()
     _tutorial.signal("run")
-    return json.dumps({"ok": True, "turrets": len(turrets) - len(dropped),
-                       "dropped": len(dropped)})
+    return json.dumps({"ok": True, "turrets": len(editor.turrets), "dropped": len(dropped)})
 
 
 # ---- interactive placement (reuses the pure ArsenalEditor state machine) ----

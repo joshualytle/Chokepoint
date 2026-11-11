@@ -41,6 +41,25 @@ def test_refill_caps_the_token_bucket():
     assert lim.tokens == 4.0  # capped at ~1s of release, can't hoard a burst
 
 
+def test_slow_limiter_can_still_earn_a_whole_token():
+    # releasing a packet costs 1 token, so the cap must never sit below 1.0
+    lim = Limiter(0, 0, release_rate=0.5)
+    lim.refill(100.0)
+    assert lim.tokens == 1.0
+
+
+def test_slow_limiter_releases_and_the_burst_clears():
+    w = World(line_graph())
+    w.set_turrets([Turret(40, 0, make_gun("sieve"))])
+    w.set_limiters([Limiter(0, 0, release_rate=0.5)])   # one packet every 2 s
+    w.spawn_q = [(0.0, "auth") for _ in range(3)]
+    w.spawn_clock = 0.0
+    w.started = True
+    step_for(w, 12)
+    assert w.stats["auth"].handled >= 3
+    assert w.wave_idx >= 1                  # the burst drained, so the wave cleared
+
+
 def test_set_limiters_binds_to_nearest_node():
     w = World(line_graph())
     w.set_limiters([Limiter(38, 1)])

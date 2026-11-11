@@ -33,6 +33,8 @@ minor versions may still move quickly.
 ### Fixed
 - A refused edge/node removal no longer reorders a fork's branches (which
   changed where ungated packets and gate routes went).
+- A quelimiter with `release_rate` below 1.0 now releases packets instead of
+  holding them forever (its token cap never reached one whole token).
 
 ### Notes
 - The desktop build (`python -m chokepoint`) is unchanged and remains the

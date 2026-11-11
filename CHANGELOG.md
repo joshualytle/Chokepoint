@@ -31,6 +31,9 @@ minor versions may still move quickly.
   app.
 
 ### Fixed
+- Sandboxed loadout code can no longer change the game's shared registries
+  (`GUN_LIBRARY`, `SYNERGIES`, `MAPS`, `MAP_LIST`, `register_gun`/`register_module`)
+  or rebind a real module's names (e.g. `DEFAULT_GATE_COST`); reads still work.
 - A refused edge/node removal no longer reorders a fork's branches (which
   changed where ungated packets and gate routes went).
 - A quelimiter with `release_rate` below 1.0 now releases packets instead of

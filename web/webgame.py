@@ -55,6 +55,10 @@ def new_game(map_name: str = "trunk", difficulty: str = "easy") -> str:
     global _world, _editor, _selected_module
     if map_name not in MAPS:
         map_name = MAP_LIST[0]
+    if difficulty not in DIFFICULTY_LIST:
+        # World would quietly play "easy" anyway; fall back here so the
+        # snapshot reports the difficulty actually being played.
+        difficulty = DIFFICULTY_LIST[0]
     _world = World(MAPS[map_name].copy(), difficulty=difficulty)
     _world.paused = True                 # start on the wave preview; UI presses Start
     _editor = ArsenalEditor(_world.unlocked(), bank=_world.bank)

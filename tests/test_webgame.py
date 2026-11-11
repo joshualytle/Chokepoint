@@ -28,6 +28,12 @@ def test_new_game_lists_maps_and_difficulties():
     assert meta["ok"] and "trunk" in meta["maps"] and "easy" in meta["difficulties"]
 
 
+def test_unknown_difficulty_falls_back_and_reports_the_real_one():
+    # World quietly plays "easy" for an unknown name; the UI must be told so.
+    wg.new_game("trunk", "bogus")
+    assert snap()["difficulty"] == "easy"
+
+
 def test_snapshot_has_the_keys_the_ui_draws():
     fresh()
     s = snap()

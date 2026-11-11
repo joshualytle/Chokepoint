@@ -53,6 +53,8 @@ minor versions may still move quickly.
   `try`/`except IndexError:` and friends work in loadout code.
 - Editing the build no longer zeroes a quelimiter's earned release credit, so
   clicking can't stall a slow limiter's releases.
+- The web app falls back to the default difficulty for an unknown name and
+  reports the one actually played, as it already did for an unknown map.
 
 ### Notes
 - The desktop build (`python -m chokepoint`) is unchanged and remains the

@@ -304,6 +304,11 @@ class World:
                 p.kind, p.payload = p.payload, ""
                 p.wait = 0.0           # decoded; its dwell clock starts fresh as a typed alert
                 self.parsed += 1
+                # From here on it is handled/leaked as its real kind, so move its
+                # spawn count there too; otherwise per-kind stats never balance.
+                self.stats[RAW_KIND].spawned -= 1
+                self.stats[p.kind].spawned += 1
+                self.telemetry.on_retype(RAW_KIND, p.kind, self.wave_idx)
 
     def _transit(self, dt: float) -> None:
         """Advance in-transit packets; on arrival they join the next node's queue."""

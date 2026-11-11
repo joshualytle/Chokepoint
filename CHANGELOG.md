@@ -37,6 +37,8 @@ minor versions may still move quickly.
   holding them forever (its token cap never reached one whole token).
 - Editing the build no longer resets turret cooldowns, so clicking can't push a
   turret past its static fire rate.
+- A decoded `raw` alert now counts as spawned under its real kind (in both the
+  stats table and telemetry), so per-kind spawned/handled/leaked add up.
 
 ### Notes
 - The desktop build (`python -m chokepoint`) is unchanged and remains the

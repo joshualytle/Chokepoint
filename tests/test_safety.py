@@ -1,12 +1,14 @@
 """Tests for the loadout-code sandbox."""
 
+import sys
 from pathlib import Path
 
 import pytest
 
 from chokepoint import loadout
 from chokepoint.arsenal import MODULE_LIBRARY, Turret, make_gun
-from chokepoint.safety import SafetyError, check_code, safe_exec
+from chokepoint.lessons import LESSONS
+from chokepoint.safety import TOO_LONG_MESSAGE, SafetyError, check_code, safe_exec, step_budget
 
 _API = {"Turret": Turret, "make_gun": make_gun, "MODULE_LIBRARY": MODULE_LIBRARY}
 
@@ -180,3 +182,128 @@ def test_shipped_loadout_passes_the_sandbox():
 def test_syntax_error_is_a_safety_error():
     with pytest.raises(SafetyError):
         check_code("def build_loadout(:\n")
+
+
+# ---- step budget: runaway player code is stopped, not left to freeze the tab ---- #
+# Each loop here is small enough to finish quickly WITHOUT a budget, so these tests
+# fail fast (rather than hang) on code that has no step budget.
+
+def test_huge_loop_in_module_body_is_cut_off():
+    with pytest.raises(SafetyError, match="ran too long"):
+        safe_exec("for i in range(10000):\n    pass\n", max_steps=100)
+
+
+def test_huge_loop_in_a_player_function_is_cut_off():
+    ns = safe_exec("def build_loadout(u, s):\n"
+                   "    for i in range(10000):\n"
+                   "        pass\n"
+                   "    return []\n")
+    with pytest.raises(SafetyError) as caught, step_budget(100):
+        ns["build_loadout"](set(), [])
+    assert str(caught.value) == TOO_LONG_MESSAGE
+    assert caught.value.__cause__.lineno in (2, 3)   # points into the loop
+
+
+@pytest.mark.parametrize("body", [
+    "x = [i for i in range(10000)]\n",                          # list comprehension
+    "x = sum(i for i in range(10000))\n",                       # generator expression
+    "x = sum(j for i in range(100) for j in range(100))\n",     # nested generator
+    "def g():\n    for i in range(10000):\n        yield i\nx = list(g())\n",
+    "x = list(map(lambda i: i, range(10000)))\n",               # called from C
+], ids=["listcomp", "genexp", "nested-genexp", "generator", "lambda-via-map"])
+def test_comprehensions_and_generators_are_counted(body):
+    with pytest.raises(SafetyError, match="ran too long"):
+        safe_exec(body, max_steps=500)
+
+
+def test_player_cannot_catch_the_stop_and_carry_on():
+    # the stop is not an Exception, so `except Exception:` must not swallow it
+    ns = safe_exec("def build_loadout(u, s):\n"
+                   "    try:\n"
+                   "        for i in range(10000):\n"
+                   "            pass\n"
+                   "    except Exception:\n"
+                   "        return 'caught'\n"
+                   "    return []\n")
+    with pytest.raises(SafetyError, match="ran too long"), step_budget(100):
+        ns["build_loadout"](set(), [])
+
+
+@pytest.mark.parametrize("lesson", [le for le in LESSONS if le.starter],
+                         ids=lambda le: le.title)
+def test_lesson_starters_run_under_the_default_budget(lesson):
+    ns = safe_exec(lesson.starter, {"Turret": Turret, "make_gun": make_gun})
+    with step_budget():
+        ns["build_loadout"](set(), [(float(i), 0.0) for i in range(40)])
+
+
+def test_normal_code_well_inside_the_budget_is_unaffected():
+    ns = safe_exec(GOOD, _API, max_steps=50)
+    with step_budget(50):
+        assert len(ns["build_loadout"]({"range+"}, [(0, 0), (1, 1)])) == 2
+
+
+def test_previous_trace_function_is_restored_and_still_works():
+    # a debugger or coverage tool may already be tracing: the budget pauses it and
+    # must hand it back afterwards - after success AND after a cut-off
+    seen: list[str] = []
+
+    def outer_tracer(frame, event, arg):
+        seen.append(frame.f_code.co_name)
+
+    def probe():
+        return 1
+
+    original = sys.gettrace()
+    sys.settrace(outer_tracer)
+    try:
+        safe_exec("x = 1\n", max_steps=10)
+        assert sys.gettrace() is outer_tracer
+        with pytest.raises(SafetyError):
+            safe_exec("for i in range(1000):\n    pass\n", max_steps=10)
+        assert sys.gettrace() is outer_tracer
+        probe()                          # the restored tracer still sees new calls
+    finally:
+        sys.settrace(original)
+    assert "probe" in seen
+
+
+def test_step_budget_leaves_no_tracer_behind():
+    original = sys.gettrace()
+    with pytest.raises(SafetyError):
+        safe_exec("for i in range(1000):\n    pass\n", max_steps=10)
+    assert sys.gettrace() is original
+
+
+# ---- one-line hangs the step budget can't see (the work happens inside C) ---- #
+@pytest.mark.parametrize("bad", [
+    "x = 10 ** 10 ** 10\n",               # a power of a power
+    "x = (10 ** 5) ** 3\n",
+    "x = 2 ** 100000\n",                  # a huge constant exponent
+    "x = 2 ** -100000\n",
+    "x = 2\nx **= 5000\n",
+    "try:\n    pass\nexcept:\n    pass\n",          # bare except could swallow the stop
+    "try:\n    pass\nfinally:\n    pass\n",          # finally runs after the stop
+    "x = Exception.mro()\n",                         # reaches BaseException
+])
+def test_rejects_code_that_could_dodge_the_step_budget(bad):
+    with pytest.raises(SafetyError):
+        check_code(bad)
+
+
+@pytest.mark.parametrize("ok", ["x = 3 ** 2\n", "x = 2.0 ** 0.5\n", "x = 2 ** -3\n",
+                                "x = 7\ny = x ** x\n"])
+def test_ordinary_powers_are_still_allowed(ok):
+    safe_exec(ok)
+
+
+@pytest.mark.parametrize("bad", ["x = range(10 ** 15)\n", "x = sum(range(10 ** 7))\n",
+                                 "x = range(0, 10 ** 30, 2)\n"])
+def test_huge_ranges_are_refused(bad):
+    with pytest.raises(SafetyError, match="range"):
+        safe_exec(bad)
+
+
+def test_ranges_up_to_the_cap_still_work():
+    ns = safe_exec("n = len(range(1000000))\nback = list(range(5, 0, -1))\n")
+    assert ns["n"] == 1_000_000 and ns["back"] == [5, 4, 3, 2, 1]

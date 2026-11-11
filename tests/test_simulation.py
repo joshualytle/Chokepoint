@@ -213,3 +213,36 @@ def test_no_spill_without_a_parallel_consumer():
         w.packets.append(Packet("auth", 12, 12, 60, at="n1"))
     w._spill(1 / 60)
     assert all(p.moving_to is None for p in w.packets)  # nowhere to spill -> they stay
+
+
+def _add_packet(w, kind, at, moving_to=None):
+    """Put a packet on the map and count its spawn, the way World._spawn does."""
+    w.packets.append(Packet(kind, 12, 12, 60, at=at, moving_to=moving_to))
+    w.stats[kind].spawned += 1
+    w.telemetry.on_spawn(kind, w.wave_idx)
+
+
+def _books_balance(w):
+    return all(s.spawned == s.handled + s.leaked + s.inflight for s in w.stats.values())
+
+
+def test_removing_a_node_counts_its_packets_as_leaked_but_spares_the_run():
+    # delta forks at n1 into n2->n3 and n4->n5; n2 can be removed (n4 path remains)
+    w = World(MAPS["delta"].copy())
+    w.spawn_q.clear()
+    _add_packet(w, "auth", "n2")                    # queued at the doomed node
+    _add_packet(w, "auth", "n1", moving_to="n2")    # travelling toward it
+    _add_packet(w, "ids", "n2", moving_to="n3")     # leaving it
+    _add_packet(w, "ids", "n1")                     # unaffected: queued upstream
+    _add_packet(w, "ids", "n3", moving_to="n6")     # unaffected: past it
+    leaks_before, health_before = w.leaks, w.health
+
+    assert w.map.remove_node("n2")
+    assert w.drop_orphaned_packets() == 3
+
+    assert len(w.packets) == 2
+    assert w.stats["auth"].leaked == 2 and w.stats["ids"].leaked == 1
+    assert _books_balance(w)                         # spawned == handled + leaked + in-flight
+    assert w.leaks == leaks_before                   # stats only: no MAX_LEAK progress ...
+    assert w.health == health_before and not w.over  # ... and no health cost
+    assert w.telemetry.kind_wave[("auth", 0)].leaked == 2

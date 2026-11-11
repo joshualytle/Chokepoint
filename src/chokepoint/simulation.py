@@ -274,10 +274,43 @@ class World:
         self._overflow()
         self._drain_health(dt)
         self.packets = [p for p in self.packets if not p.dead]
-        for k in KIND_LIST:
-            self.stats[k].inflight = sum(1 for p in self.packets if p.kind == k)
+        self._count_inflight()
         self.telemetry.observe(self, dt)
         self._wave_check()
+
+    def _count_inflight(self) -> None:
+        """Refresh each kind's in-flight count from the live packet list."""
+        for k in KIND_LIST:
+            self.stats[k].inflight = sum(1 for p in self.packets if p.kind == k)
+
+    def drop_orphaned_packets(self) -> int:
+        """Remove packets stranded by a topology edit, counting them as leaked.
+
+        When the player deletes a node mid-wave, any packet queued at it or
+        travelling toward it has nowhere to go. Silently deleting them would break
+        the per-kind books (spawned == handled + leaked + in-flight), so each one
+        is recorded as a leak in ``stats`` and in telemetry (cause ``"removed"``).
+
+        This is deliberately the "stats only" option: it does NOT add to
+        ``self.leaks`` (the MAX_LEAK game-over counter) and costs no health, so
+        the player's own edit can never end the run. Returns how many were dropped.
+        """
+        valid = self.map.nodes
+        kept: list[Packet] = []
+        dropped = 0
+        for p in self.packets:
+            heading_nowhere = p.moving_to is not None and p.moving_to not in valid
+            stranded = p.at not in valid or heading_nowhere
+            if not stranded or p.dead:
+                kept.append(p)      # dead packets were already counted; step() clears them
+                continue
+            p.dead = True
+            self.stats[p.kind].leaked += 1
+            self.telemetry.on_leak(p.kind, p.at, self.wave_idx, "removed", p.wait)
+            dropped += 1
+        self.packets = kept
+        self._count_inflight()      # keep the books balanced right now, not next step
+        return dropped
 
     def _spawn(self, dt: float) -> None:
         if self.intermission > 0:

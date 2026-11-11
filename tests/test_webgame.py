@@ -11,6 +11,7 @@ import pytest
 import webgame as wg
 
 from chokepoint.arsenal import MODULE_LIBRARY
+from chokepoint.packets import Packet
 from chokepoint.safety import check_code
 
 
@@ -240,3 +241,17 @@ def test_walkthroughs_and_tutorial_state():
     assert {"basics", "overflow", "routing", "ingest", "upgrades"} <= ids
     assert json.loads(wg.start_walkthrough("routing"))["ok"]
     assert json.loads(wg.tutorial_state())["active"]
+
+
+# ---- build mode ---- #
+def test_removing_a_node_through_the_bridge_keeps_stats_balanced():
+    fresh("delta")
+    w = wg._world
+    for at, moving_to in (("n2", None), ("n1", "n2"), ("n1", None)):
+        w.packets.append(Packet("auth", 12, 12, 60, at=at, moving_to=moving_to))
+        w.stats["auth"].spawned += 1
+    assert json.loads(wg.remove_node("n2"))["ok"]
+    s = w.stats["auth"]
+    assert (s.leaked, s.inflight) == (2, 1)
+    assert s.spawned == s.handled + s.leaked + s.inflight
+    assert w.leaks == 0 and not w.over

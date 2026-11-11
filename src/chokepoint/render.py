@@ -224,10 +224,8 @@ async def main() -> None:  # pragma: no cover - needs a display
     def topology_edited() -> None:
         """After a structural change, re-snap devices and drop ONLY packets that now
         reference a removed node — so adding a branch mid-wave no longer wipes the
-        alerts already in flight."""
-        valid = world.map.nodes
-        world.packets = [p for p in world.packets
-                         if p.at in valid and (p.moving_to is None or p.moving_to in valid)]
+        alerts already in flight. Dropped packets are counted as leaked (stats only)."""
+        world.drop_orphaned_packets()
         world.rebind()
 
     def apply_code(src: str) -> None:

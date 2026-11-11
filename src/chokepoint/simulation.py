@@ -101,12 +101,17 @@ class World:
         return next((g for g in self.gates if g.node == node_id), None)
 
     def set_limiters(self, limiters: list[Limiter]) -> None:
-        """Place quelimiters and bind each to its nearest node."""
+        """Place quelimiters and bind each to its nearest node.
+
+        The release credit (``lim.tokens``) is deliberately left alone, like a
+        turret's cooldown in set_turrets: the editor calls this on every click,
+        and zeroing it would stall a slow limiter's releases. A new Limiter
+        starts at 0.0 and reset() zeroes it per run.
+        """
         self.limiters = limiters
         for i, lim in enumerate(limiters):
             lim.id = f"L{i + 1}"
             lim.node = self.map.nearest_node(lim.x, lim.y)
-            lim.tokens = 0.0
 
     def limiter_at(self, node_id: str) -> Limiter | None:
         return next((lim for lim in self.limiters if lim.node == node_id), None)

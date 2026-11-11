@@ -51,6 +51,8 @@ minor versions may still move quickly.
   `return`) now reports the error and leaves credits and the build untouched.
 - Exported loadouts (`from __future__ import annotations`) load on the web, and
   `try`/`except IndexError:` and friends work in loadout code.
+- Editing the build no longer zeroes a quelimiter's earned release credit, so
+  clicking can't stall a slow limiter's releases.
 
 ### Notes
 - The desktop build (`python -m chokepoint`) is unchanged and remains the

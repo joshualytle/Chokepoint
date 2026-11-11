@@ -8,7 +8,8 @@ browser. So all player code goes through here first.
 
 Two layers of defense:
   * ``check_code`` — an AST allowlist: reject imports outside a tiny set, reject
-    dunder attribute access (``__class__``/``__globals__``/``__subclasses__`` …),
+    underscore and introspection attribute access (``__class__``, ``gi_frame``,
+    ``f_back``, ``co_consts`` …) and ``str.format``,
     reject dangerous names (eval/exec/open/__import__ …), and reject class defs
     and ``while`` loops (a loadout needs neither, and ``while`` can hang the tab).
   * ``safe_exec`` — exec with a curated, minimal ``__builtins__`` plus a guarded
@@ -56,6 +57,23 @@ _FORBIDDEN_NAMES = frozenset({
 })
 
 
+# Attribute prefixes of Python's introspection objects: generator/coroutine/async-gen
+# (gi_/cr_/ag_), frames (f_), tracebacks (tb_) and code objects (co_). They are not
+# dunders, but gen.gi_frame.f_back.f_builtins walks from your own frame out to the
+# REAL builtins (open, __import__), so none of them may be touched.
+_FORBIDDEN_ATTR_PREFIXES = ("_", "gi_", "cr_", "ag_", "f_", "tb_", "co_")
+
+# str.format / format_map can read attributes from inside the format string itself
+# ("{0.__class__}".format(x)) - text the AST check never sees - so ban them outright.
+# f-strings are fine: their {...} parts are real code that this checker does inspect.
+_FORBIDDEN_ATTRS = frozenset({"format", "format_map"})
+
+
+def _forbidden_attribute(attr: str) -> bool:
+    # str.startswith accepts a tuple and is True if ANY of the prefixes match
+    return attr in _FORBIDDEN_ATTRS or attr.startswith(_FORBIDDEN_ATTR_PREFIXES)
+
+
 def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):  # noqa: A002
     if level != 0 or name not in ALLOWED_IMPORTS:
         raise SafetyError(f"import of {name!r} is not allowed")
@@ -85,8 +103,8 @@ def check_code(src: str) -> None:
             if node.module not in ALLOWED_IMPORTS:
                 raise SafetyError(f"import from {node.module!r} is not allowed")
         elif isinstance(node, ast.Attribute):
-            if node.attr.startswith("__") and node.attr.endswith("__"):
-                raise SafetyError(f"access to dunder attribute {node.attr!r} is not allowed")
+            if _forbidden_attribute(node.attr):
+                raise SafetyError(f"access to attribute {node.attr!r} is not allowed")
         elif isinstance(node, ast.Name) and node.id in _FORBIDDEN_NAMES:
             raise SafetyError(f"use of {node.id!r} is not allowed")
         elif isinstance(node, ast.ClassDef):

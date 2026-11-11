@@ -50,6 +50,41 @@ def test_rejects_dangerous_code(bad):
         check_code(bad)
 
 
+@pytest.mark.parametrize("bad", [
+    # frame/generator/code/traceback introspection: not dunders, but each one is a
+    # step on the walk from your own frame back to the real builtins
+    "g.gi_frame\n",
+    "c.cr_frame\n",
+    "a.ag_frame\n",
+    "fr.f_back\n",
+    "fr.f_globals\n",
+    "fr.f_builtins\n",
+    "tb.tb_frame\n",
+    "fn.co_consts\n",
+    "x._private\n",                                 # any leading underscore
+    "'{0.__class__}'.format(1)\n",                  # format strings walk attributes too
+    "'{x}'.format_map({})\n",
+])
+def test_rejects_introspection_attributes(bad):
+    with pytest.raises(SafetyError):
+        check_code(bad)
+
+
+def test_generator_frame_walk_escape_is_blocked():
+    # a generator's frame links back (f_back) to safe_exec's frame, whose f_builtins
+    # are the REAL builtins (open, __import__) - the checker must stop the first step
+    escape = (
+        "def _g():\n"
+        "    yield gen.gi_frame.f_back\n"
+        "gen = _g()\n"
+        "for fr in gen:\n"
+        "    break\n"
+        "real = fr.f_back.f_builtins\n"
+    )
+    with pytest.raises(SafetyError):
+        safe_exec(escape, _API)
+
+
 def test_safe_exec_blocks_import_even_if_ast_missed_it():
     # belt-and-suspenders: the guarded __import__ also refuses non-allowlisted modules
     with pytest.raises(SafetyError):

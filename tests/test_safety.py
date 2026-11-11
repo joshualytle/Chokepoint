@@ -1,7 +1,10 @@
 """Tests for the loadout-code sandbox."""
 
+from pathlib import Path
+
 import pytest
 
+from chokepoint import loadout
 from chokepoint.arsenal import MODULE_LIBRARY, Turret, make_gun
 from chokepoint.safety import SafetyError, check_code, safe_exec
 
@@ -161,6 +164,17 @@ def test_imported_module_library_can_still_be_read():
         "maybe = MODULE_LIBRARY.get('nope')\n")
     assert ns["amp"] is MODULE_LIBRARY["amp"] and ns["has_amp"]
     assert ns["names"] == sorted(MODULE_LIBRARY) and ns["maybe"] is None
+
+
+def test_shipped_loadout_passes_the_sandbox():
+    # the example loadout.py is what players paste into the web editor, so it
+    # must use the absolute imports the sandbox allows (not `from .arsenal`)
+    src = Path(loadout.__file__).read_text(encoding="utf-8")
+    check_code(src)
+    ns = safe_exec(src)
+    slots = [(0.0, 0.0), (10.0, 0.0), (20.0, 0.0)]
+    assert len(ns["build_loadout"]({"amp"}, slots)) == 2
+    assert len(ns["build_parsers"](set(), slots)) == 1
 
 
 def test_syntax_error_is_a_safety_error():

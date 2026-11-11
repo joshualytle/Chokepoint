@@ -57,6 +57,8 @@ minor versions may still move quickly.
   reports the one actually played, as it already did for an unknown map.
 - Importing `MODULE_LIBRARY` from `chokepoint.arsenal` in loadout code now gives
   a read-only view too, so it can't empty the shared registry that way either.
+- The shipped example `loadout.py` uses absolute imports, so it can be pasted
+  into the web editor (the sandbox refuses relative imports).
 
 ### Notes
 - The desktop build (`python -m chokepoint`) is unchanged and remains the

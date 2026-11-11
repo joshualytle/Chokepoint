@@ -41,6 +41,16 @@ minor versions may still move quickly.
   stats table and telemetry), so per-kind spawned/handled/leaked add up.
 - The credit bank refuses negative amounts, so a device with a negative cost
   can no longer mint credits or drive the balance below zero on refund.
+- The loadout sandbox now blocks underscore and introspection attributes
+  (`gi_frame`, `f_back`, `co_consts` …), `str.format`, and underscore or `*`
+  names in from-imports, which could reach the real builtins. f-strings still
+  work.
+- Loadout code gets a read-only `MODULE_LIBRARY`, so it can't empty the shared
+  registry.
+- A loadout that fails part-way on the web (a bad device builder, a missing
+  `return`) now reports the error and leaves credits and the build untouched.
+- Exported loadouts (`from __future__ import annotations`) load on the web, and
+  `try`/`except IndexError:` and friends work in loadout code.
 
 ### Notes
 - The desktop build (`python -m chokepoint`) is unchanged and remains the

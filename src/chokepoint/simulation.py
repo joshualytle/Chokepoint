@@ -78,11 +78,15 @@ class World:
 
     # ---- setup ---- #
     def set_turrets(self, turrets: list[Turret]) -> None:
-        """Place turrets and bind each to the node whose queue it serves."""
+        """Place turrets and bind each to the node whose queue it serves.
+
+        The cooldown (``t.cd``) is deliberately left alone: the editor calls this
+        on every click, and resetting it would hand out free shots, breaking the
+        static fire rate. A new Turret starts at 0.0 and reset() zeroes it per run.
+        """
         self.turrets = turrets
         for i, t in enumerate(turrets):
             t.id = f"T{i + 1}"
-            t.cd = 0.0
             t.node = self.map.nearest_node(t.x, t.y)
 
     def set_gates(self, gates: list[Gate]) -> None:

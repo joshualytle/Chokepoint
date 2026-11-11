@@ -35,6 +35,8 @@ minor versions may still move quickly.
   changed where ungated packets and gate routes went).
 - A quelimiter with `release_rate` below 1.0 now releases packets instead of
   holding them forever (its token cap never reached one whole token).
+- Editing the build no longer resets turret cooldowns, so clicking can't push a
+  turret past its static fire rate.
 
 ### Notes
 - The desktop build (`python -m chokepoint`) is unchanged and remains the

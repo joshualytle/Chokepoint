@@ -47,6 +47,25 @@ def test_set_turrets_binds_each_to_nearest_node():
     assert w.turrets[0].node == "n1"
 
 
+def test_rebinding_turrets_does_not_grant_free_shots():
+    # The editor re-syncs (set_turrets) on every click. That must not reset the
+    # cooldown, or clicking would push a turret past its static fire_rate.
+    gm = MAPS["switchback"]
+    w = World(gm)
+    w.set_turrets([Turret(*gm.pos("n1"), make_gun("sieve"))])
+    w.intermission = 1e9                  # no wave spawns; we feed n1 by hand
+    seconds, frames = 5, 60 * 5
+    for i in range(frames):
+        while len(w.queue_at("n1")) < 3:  # fat packets keep the turret busy
+            w.packets.append(Packet("auth", 1e9, 1e9, 60.0, at="n1"))
+        if i % 6 == 0:
+            w.set_turrets(w.turrets)      # what sync_world() does after a click
+        w.health = START_HEALTH           # the fat packets age; keep the run alive
+        w.step(1 / 60)
+    t = w.turrets[0]
+    assert t.fired <= t.gun.fire_rate * seconds + 1
+
+
 # ---- coverage / handling ---- #
 def test_covered_kind_gets_handled():
     # a sieve at a node on the route covers auth; auth packets get processed there

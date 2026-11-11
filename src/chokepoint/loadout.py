@@ -13,8 +13,10 @@ Return a list of Turret objects. Placement lives on each turret (its x, y).
 
 from __future__ import annotations
 
-from .arsenal import MODULE_LIBRARY, Turret, make_gun
-from .parsers import Parser
+# Absolute imports (not `from .arsenal`): the web editor's sandbox only allows
+# these, so this same file can be pasted there unchanged.
+from chokepoint.arsenal import MODULE_LIBRARY, Turret, make_gun
+from chokepoint.parsers import Parser
 
 
 def build_loadout(unlocked: set[str], slots: list[tuple[float, float]]) -> list[Turret]:

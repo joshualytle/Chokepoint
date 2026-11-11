@@ -51,6 +51,14 @@ minor versions may still move quickly.
   `return`) now reports the error and leaves credits and the build untouched.
 - Exported loadouts (`from __future__ import annotations`) load on the web, and
   `try`/`except IndexError:` and friends work in loadout code.
+- Editing the build no longer zeroes a quelimiter's earned release credit, so
+  clicking can't stall a slow limiter's releases.
+- The web app falls back to the default difficulty for an unknown name and
+  reports the one actually played, as it already did for an unknown map.
+- Importing `MODULE_LIBRARY` from `chokepoint.arsenal` in loadout code now gives
+  a read-only view too, so it can't empty the shared registry that way either.
+- The shipped example `loadout.py` uses absolute imports, so it can be pasted
+  into the web editor (the sandbox refuses relative imports).
 
 ### Notes
 - The desktop build (`python -m chokepoint`) is unchanged and remains the

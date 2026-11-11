@@ -67,6 +67,24 @@ def test_set_limiters_binds_to_nearest_node():
     assert w.limiter_at("n1") is not None
 
 
+def test_rebinding_limiters_keeps_accrued_release_credit():
+    # The editor re-syncs (set_limiters) on every click. That must not throw
+    # away a limiter's earned tokens, or clicking would stall its releases.
+    w = World(line_graph())
+    w.set_limiters([Limiter(0, 0, release_rate=0.5)])
+    w.limiters[0].tokens = 0.75           # credit earned mid-run
+    w.set_limiters(w.limiters)            # what sync_world() does after a click
+    assert w.limiters[0].tokens == 0.75
+
+
+def test_reset_zeroes_limiter_tokens_for_a_new_run():
+    w = World(line_graph())
+    w.set_limiters([Limiter(0, 0)])
+    w.limiters[0].tokens = 0.75
+    w.reset()
+    assert w.limiters[0].tokens == 0.0
+
+
 def test_default_release_rate_is_positive():
     assert LIMITER_RELEASE_RATE > 0
 

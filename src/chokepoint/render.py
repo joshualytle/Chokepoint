@@ -159,13 +159,8 @@ async def main() -> None:  # pragma: no cover - needs a display
             world.map = build_topology()   # resume a designed map
             world.packets.clear()
         if refund_current:
-            for t in world.turrets:
-                world.bank.earn(gun_cost(t.gun))
-            for gt in world.gates:
-                world.bank.earn(gt.cost)
-            for lm in world.limiters:
-                world.bank.earn(lm.cost)
-            for ps in world.parsers:
+            editor.refund_all()           # turrets (+ modules), gates, limiters
+            for ps in world.parsers:      # parsers live on the world, not the editor
                 world.bank.earn(ps.cost)
         editor = ArsenalEditor(world.unlocked(), bank=world.bank)
         dropped = editor.seed_purchase(
@@ -266,8 +261,7 @@ async def main() -> None:  # pragma: no cover - needs a display
             code_status["msg"] = f"error: {err}"
             say("code not applied — see editor", ok=False)
             return
-        for t in world.turrets:            # refund and reseed from the lesson build
-            world.bank.earn(gun_cost(t.gun))
+        editor.refund_all()                # refund the whole build, reseed from the lesson
         editor = ArsenalEditor(world.unlocked(), bank=world.bank)
         editor.seed_purchase(turrets)
         sync_world()
@@ -477,13 +471,7 @@ async def main() -> None:  # pragma: no cover - needs a display
                 elif edit_mode and ev.key == pygame.K_b:
                     editor.select_limiter()  # quelimiter (buffer) placement mode
                 elif edit_mode and ev.key == pygame.K_x:
-                    for t in editor.to_turrets():    # clear all placements, refunded
-                        world.bank.earn(gun_cost(t.gun))
-                    for gt in editor.to_gates():
-                        world.bank.earn(gt.cost)
-                    for lm in editor.to_limiters():
-                        world.bank.earn(lm.cost)
-                    editor.clear()
+                    editor.refund_all()              # clear all placements, refunded
                     sync_world()
                     say("cleared all placements (refunded)")
                 elif edit_mode and pygame.K_1 <= ev.key <= pygame.K_9:

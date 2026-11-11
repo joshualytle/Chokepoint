@@ -362,3 +362,30 @@ def test_editor_and_world_share_one_bank_by_reference():
     ed.place(100, 100)
     # spending through the editor is visible on the world's bank — same object
     assert w.bank.balance == 500 - gun_cost(make_gun("sieve"))
+
+
+def test_refund_all_returns_every_credit_spent():
+    ed, bank = banked_editor(5000)
+    ed.select_gun("sieve")
+    ed.toggle_module("range+")                   # a module queued at placement ...
+    ed.place(100, 100)
+    ed.select_gun("auditor")
+    ed.place(300, 100)
+    assert ed.equip_at(300, 100, "amp")          # ... and one equipped afterwards
+    assert ed.place_gate(200, 200) is not None
+    assert ed.place_limiter(400, 200) is not None
+    spent = 5000 - bank.balance
+
+    assert ed.refund_all() == spent
+    assert bank.balance == 5000                  # back to the balance before buying
+    assert ed.to_turrets() == [] and ed.to_gates() == [] and ed.to_limiters() == []
+    assert ed.refund_all() == 0                  # cleared, so no double refund
+    assert bank.balance == 5000
+
+
+def test_refund_all_in_free_mode_refunds_nothing():
+    ed = full_editor()  # no bank
+    ed.select_gun("sieve")
+    ed.place(100, 100)
+    assert ed.refund_all() == 0
+    assert ed.to_turrets() == []

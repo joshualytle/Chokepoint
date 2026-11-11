@@ -132,6 +132,44 @@ def test_load_loadout_deploys_and_reports_error_line():
     assert bad["ok"] is False and bad["line"] == 2
 
 
+_ONE_TURRET = ("def build_loadout(unlocked, slots):\n"
+               "    return [Turret(*slots[0], gun=make_gun('sieve'))]\n")
+
+
+@pytest.mark.parametrize("src", [
+    _ONE_TURRET + "def build_parsers(unlocked, slots):\n    return [1 / 0]\n",
+    _ONE_TURRET + "def build_gates(unlocked, slots):\n    raise ValueError('oops')\n",
+    _ONE_TURRET + "def build_limiters(unlocked, slots):\n    return None\n",
+    _ONE_TURRET + "def build_gates(unlocked, slots):\n    return [Gate(0, 0, cost='lots')]\n",
+    "def build_loadout(unlocked, slots):\n    turrets = []\n",       # forgot to return
+], ids=["parsers-raise", "gates-raise", "limiters-none", "bad-gate-cost", "loadout-none"])
+def test_failed_load_leaves_the_build_untouched(src):
+    # a loadout that blows up part-way must not spend credits, swap the editor, or
+    # leave the editor and World disagreeing - it reports the error like any other
+    fresh()
+    wg.select_gun("scatter")
+    assert json.loads(wg.place_at(370, 180))["ok"]
+    before_balance = wg._world.bank.balance
+    before_editor = [(t.gun.name, t.x, t.y) for t in wg._editor.turrets]
+    before_world = [(t.gun.name, t.x, t.y) for t in wg._world.turrets]
+    before_undo = len(wg._undo)
+
+    r = json.loads(wg.load_loadout(src))   # must return JSON, not raise
+
+    assert r["ok"] is False and r["error"]
+    assert wg._world.bank.balance == before_balance
+    assert [(t.gun.name, t.x, t.y) for t in wg._editor.turrets] == before_editor
+    assert [(t.gun.name, t.x, t.y) for t in wg._world.turrets] == before_world
+    assert len(wg._undo) == before_undo
+
+
+def test_failed_load_reports_the_line_in_player_code():
+    fresh()
+    r = json.loads(wg.load_loadout(
+        _ONE_TURRET + "def build_parsers(unlocked, slots):\n    return [1 / 0]\n"))
+    assert r["ok"] is False and r["line"] == 4 and "ZeroDivisionError" in r["error"]
+
+
 @pytest.mark.parametrize("mutate", [
     "MODULE_LIBRARY.clear()",
     "MODULE_LIBRARY['amp'] = None",

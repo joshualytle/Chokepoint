@@ -20,6 +20,7 @@ import copy
 import json
 import math
 import traceback
+from types import MappingProxyType
 
 from chokepoint.arsenal import MODULE_LIBRARY, Module, Turret, make_gun
 from chokepoint.editor import ArsenalEditor
@@ -36,10 +37,13 @@ from chokepoint.safety import SafetyError, safe_exec
 from chokepoint.simulation import DWELL_GRACE, MAX_LEAK, QUEUE_CAP, START_HEALTH, World
 from chokepoint.tutorial import Step, Tutorial
 
-# the game objects a loadout may use, injected so no imports are even required
+# the game objects a loadout may use, injected so no imports are even required.
+# MappingProxyType is a read-only window onto a dict: lookups work, but .clear(),
+# .pop() and item assignment raise, so player code can't wreck the shared registry.
 _LOADOUT_API = {
     "Turret": Turret, "make_gun": make_gun, "Module": Module,
-    "MODULE_LIBRARY": MODULE_LIBRARY, "Parser": Parser, "Gate": Gate, "Limiter": Limiter,
+    "MODULE_LIBRARY": MappingProxyType(MODULE_LIBRARY), "Parser": Parser, "Gate": Gate,
+    "Limiter": Limiter,
 }
 
 _world: World | None = None

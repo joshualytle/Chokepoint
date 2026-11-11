@@ -7,7 +7,10 @@ and the placement/economy/resume behaviors that don't live in the pure core.
 
 import json
 
+import pytest
 import webgame as wg
+
+from chokepoint.arsenal import MODULE_LIBRARY
 
 
 def fresh(map_name="trunk", difficulty="easy"):
@@ -127,6 +130,37 @@ def test_load_loadout_deploys_and_reports_error_line():
         "def build_loadout(unlocked, slots):\n"
         "    return [Turret(*slots[999], gun=make_gun('sieve'))]\n"))
     assert bad["ok"] is False and bad["line"] == 2
+
+
+@pytest.mark.parametrize("mutate", [
+    "MODULE_LIBRARY.clear()",
+    "MODULE_LIBRARY['amp'] = None",
+    "MODULE_LIBRARY.pop('amp')",
+])
+def test_loadout_cannot_mutate_the_module_registry(mutate):
+    # player code gets a read-only view: a bad loadout must not break the palette
+    # (or anyone's later loadouts) for the rest of the session
+    fresh()
+    before = dict(MODULE_LIBRARY)
+    try:
+        r = json.loads(wg.load_loadout(f"{mutate}\ndef build_loadout(u, s):\n    return []\n"))
+        assert r["ok"] is False
+        assert MODULE_LIBRARY == before
+    finally:                       # if it did get through, don't break the other tests
+        MODULE_LIBRARY.clear()
+        MODULE_LIBRARY.update(before)
+
+
+def test_loadout_can_still_read_the_module_registry():
+    fresh()
+    wg.grant_sandbox_credits()
+    r = json.loads(wg.load_loadout(
+        "def build_loadout(unlocked, slots):\n"
+        "    gun = make_gun('sieve')\n"
+        "    gun.attach(MODULE_LIBRARY['amp'])\n"
+        "    names = sorted(MODULE_LIBRARY)\n"
+        "    return [Turret(*slots[0], gun=gun)] if 'amp' in names else []\n"))
+    assert r["ok"] and r["turrets"] == 1
 
 
 # ---- training surfaces ---- #

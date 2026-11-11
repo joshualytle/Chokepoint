@@ -55,6 +55,8 @@ minor versions may still move quickly.
   clicking can't stall a slow limiter's releases.
 - The web app falls back to the default difficulty for an unknown name and
   reports the one actually played, as it already did for an unknown map.
+- Importing `MODULE_LIBRARY` from `chokepoint.arsenal` in loadout code now gives
+  a read-only view too, so it can't empty the shared registry that way either.
 
 ### Notes
 - The desktop build (`python -m chokepoint`) is unchanged and remains the

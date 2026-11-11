@@ -13,8 +13,9 @@ Two layers of defense:
     reject dangerous names (eval/exec/open/__import__ …), and reject class defs
     and ``while`` loops (a loadout needs neither, and ``while`` can hang the tab).
   * ``safe_exec`` — exec with a curated, minimal ``__builtins__`` plus a guarded
-    ``__import__`` that only resolves the allowlist, so there is little to reach
-    even if something slips past the AST pass.
+    ``__import__`` that only resolves the allowlist (handing back shared
+    registries as read-only views), so there is little to reach even if
+    something slips past the AST pass.
 
 Python sandboxing is not provably complete, but this blocks the practical
 vectors. Treat it as defense in depth: do not auto-run untrusted *shared* code
@@ -26,6 +27,7 @@ from __future__ import annotations
 import ast
 import builtins as _builtins
 import importlib
+import types
 
 
 class SafetyError(ValueError):
@@ -85,11 +87,30 @@ def _forbidden_attribute(attr: str) -> bool:
 _FUTURE = "__future__"
 
 
+# Shared registries a loadout may READ but must not change. Importing the module
+# hands back a stand-in whose registry is a read-only view (a MappingProxyType:
+# lookups, `in` and iteration work; .clear() and item assignment do not). The
+# game's own imports never come through here, so they still see the real dict.
+_READ_ONLY_NAMES: dict[str, tuple[str, ...]] = {
+    "chokepoint.arsenal": ("MODULE_LIBRARY",),
+}
+
+
 def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):  # noqa: A002
     allowed = name in ALLOWED_IMPORTS or (name == _FUTURE and bool(fromlist))
     if level != 0 or not allowed:
         raise SafetyError(f"import of {name!r} is not allowed")
-    return importlib.import_module(name)
+    module = importlib.import_module(name)
+    read_only = _READ_ONLY_NAMES.get(name)
+    if not read_only:
+        return module
+    # A fresh module object holding a copy of the real one's names, so neither
+    # `from m import X` nor `m.X = ...` can reach the real registry.
+    stand_in = types.ModuleType(name)
+    stand_in.__dict__.update(module.__dict__)
+    for attr in read_only:
+        setattr(stand_in, attr, types.MappingProxyType(getattr(module, attr)))
+    return stand_in
 
 
 def _safe_builtins() -> dict:

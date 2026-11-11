@@ -134,6 +134,35 @@ def test_safe_exec_blocks_import_even_if_ast_missed_it():
         safe_exec("import os\n")
 
 
+@pytest.mark.parametrize("bad", [
+    "from chokepoint.arsenal import MODULE_LIBRARY\nMODULE_LIBRARY.clear()\n",
+    "from chokepoint.arsenal import MODULE_LIBRARY\nMODULE_LIBRARY['amp'] = None\n",
+    "import chokepoint.arsenal\nchokepoint.MODULE_LIBRARY.clear()\n",
+])
+def test_imported_module_library_is_read_only(bad):
+    # web/webgame.py injects a read-only MODULE_LIBRARY; importing it must not
+    # hand back the live registry dict instead.
+    before = dict(MODULE_LIBRARY)
+    try:
+        with pytest.raises((TypeError, AttributeError)):
+            safe_exec(bad)
+        assert MODULE_LIBRARY == before
+    finally:
+        MODULE_LIBRARY.clear()          # repair the shared registry if the test failed
+        MODULE_LIBRARY.update(before)
+
+
+def test_imported_module_library_can_still_be_read():
+    ns = safe_exec(
+        "from chokepoint.arsenal import MODULE_LIBRARY\n"
+        "amp = MODULE_LIBRARY['amp']\n"
+        "has_amp = 'amp' in MODULE_LIBRARY\n"
+        "names = sorted(MODULE_LIBRARY)\n"
+        "maybe = MODULE_LIBRARY.get('nope')\n")
+    assert ns["amp"] is MODULE_LIBRARY["amp"] and ns["has_amp"]
+    assert ns["names"] == sorted(MODULE_LIBRARY) and ns["maybe"] is None
+
+
 def test_syntax_error_is_a_safety_error():
     with pytest.raises(SafetyError):
         check_code("def build_loadout(:\n")

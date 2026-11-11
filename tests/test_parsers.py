@@ -84,3 +84,22 @@ def test_spawned_raw_carries_a_consumable_payload():
     raw = [p for p in w.packets if p.kind == "raw"]
     assert raw, "ingest wave should have spawned at least one raw alert"
     assert all(p.payload and p.payload != "raw" for p in raw)
+
+
+def test_per_kind_stats_balance_when_raw_is_decoded():
+    # A decoded raw alert is handled/leaked under its payload kind, so its spawn
+    # must move there too: for every kind, spawned == handled + leaked + in-flight.
+    w = World(MAPS["trunk"].copy(), difficulty="ingest")
+    w.set_parsers([Parser(*w.map.pos("n0"), handles={"auth"})])
+    w.set_turrets([Turret(*w.map.pos("n1"), make_gun("sieve"))])
+    for _ in range(60 * 40):
+        w.step(1 / 60)
+        if w.wave_idx >= 1 or w.over:
+            break
+    assert w.parsed > 0                   # the scenario really decoded some raw
+    tel = w.telemetry.kind_summary()
+    for kind, s in w.stats.items():
+        assert s.spawned == s.handled + s.leaked + s.inflight, kind
+        if kind in tel:
+            kw = tel[kind]
+            assert kw.spawned == kw.handled + kw.leaked + s.inflight, kind

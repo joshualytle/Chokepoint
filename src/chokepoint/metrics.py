@@ -132,6 +132,15 @@ class Telemetry:
     def on_spawn(self, kind: str, wave: int) -> None:
         self._kw(kind, wave).spawned += 1
 
+    def on_retype(self, old_kind: str, new_kind: str, wave: int) -> None:
+        """A packet changed kind (a parser decoded a raw alert): move its spawn.
+
+        Safe to do per wave because a wave only ends once every packet is gone,
+        so a packet is always decoded in the same wave it spawned in.
+        """
+        self._kw(old_kind, wave).spawned -= 1
+        self._kw(new_kind, wave).spawned += 1
+
     def on_handle(self, kind: str, node: str, wave: int, dwell: float) -> None:
         self._kw(kind, wave).handled += 1
         self._nw(node, wave).dwell_seconds += dwell

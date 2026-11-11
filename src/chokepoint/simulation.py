@@ -78,11 +78,15 @@ class World:
 
     # ---- setup ---- #
     def set_turrets(self, turrets: list[Turret]) -> None:
-        """Place turrets and bind each to the node whose queue it serves."""
+        """Place turrets and bind each to the node whose queue it serves.
+
+        The cooldown (``t.cd``) is deliberately left alone: the editor calls this
+        on every click, and resetting it would hand out free shots, breaking the
+        static fire rate. A new Turret starts at 0.0 and reset() zeroes it per run.
+        """
         self.turrets = turrets
         for i, t in enumerate(turrets):
             t.id = f"T{i + 1}"
-            t.cd = 0.0
             t.node = self.map.nearest_node(t.x, t.y)
 
     def set_gates(self, gates: list[Gate]) -> None:
@@ -300,6 +304,11 @@ class World:
                 p.kind, p.payload = p.payload, ""
                 p.wait = 0.0           # decoded; its dwell clock starts fresh as a typed alert
                 self.parsed += 1
+                # From here on it is handled/leaked as its real kind, so move its
+                # spawn count there too; otherwise per-kind stats never balance.
+                self.stats[RAW_KIND].spawned -= 1
+                self.stats[p.kind].spawned += 1
+                self.telemetry.on_retype(RAW_KIND, p.kind, self.wave_idx)
 
     def _transit(self, dt: float) -> None:
         """Advance in-transit packets; on arrival they join the next node's queue."""

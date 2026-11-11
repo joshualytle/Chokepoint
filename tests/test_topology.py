@@ -105,6 +105,35 @@ def test_cannot_strand_the_pipeline():
     assert g.branches("n0") == ["n1"]
 
 
+def _snapshot(g):
+    """Everything a refused edit must leave alone, including order: branch index
+    0 is where ungated packets go, and gate routes are branch indices."""
+    return list(g.nodes), [(k, list(v)) for k, v in g.adj.items()]
+
+
+def test_refused_remove_edge_keeps_branch_order():
+    g = trunk()
+    spur = g.add_node(100, 90)          # n1 forks: [n2 (to sink), spur (dead end)]
+    g.add_edge("n1", spur)
+    before = _snapshot(g)
+    assert g.remove_edge("n1", "n2") is False   # n2 is the only way to the sink
+    assert _snapshot(g) == before
+    assert g.branches("n1") == ["n2", spur]
+
+
+def test_refused_remove_node_keeps_branch_and_node_order():
+    # n0 -> n1 -> [mid, spur]; mid -> n3(sink). mid is the only path through.
+    g = build_graph("fork-test",
+                    {"n0": (0, 0), "n1": (100, 0), "mid": (150, 0),
+                     "spur": (150, 90), "n3": (200, 0)},
+                    edges=[("n0", "n1"), ("n1", "mid"), ("n1", "spur"), ("mid", "n3")],
+                    source="n0", sink="n3", slots=[(100, 0)])
+    before = _snapshot(g)
+    assert g.remove_node("mid") is False
+    assert _snapshot(g) == before
+    assert g.branches("n1") == ["mid", "spur"]
+
+
 # ---- copy isolation ---- #
 def test_copy_is_independent_of_the_base():
     g = trunk()

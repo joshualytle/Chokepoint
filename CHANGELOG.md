@@ -30,6 +30,18 @@ minor versions may still move quickly.
 - Retired the older pygame-in-browser (pygbag) build in favor of the native-web
   app.
 
+### Fixed
+- A refused edge/node removal no longer reorders a fork's branches (which
+  changed where ungated packets and gate routes went).
+- A quelimiter with `release_rate` below 1.0 now releases packets instead of
+  holding them forever (its token cap never reached one whole token).
+- Editing the build no longer resets turret cooldowns, so clicking can't push a
+  turret past its static fire rate.
+- A decoded `raw` alert now counts as spawned under its real kind (in both the
+  stats table and telemetry), so per-kind spawned/handled/leaked add up.
+- The credit bank refuses negative amounts, so a device with a negative cost
+  can no longer mint credits or drive the balance below zero on refund.
+
 ### Notes
 - The desktop build (`python -m chokepoint`) is unchanged and remains the
   reference experience.

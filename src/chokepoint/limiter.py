@@ -39,4 +39,7 @@ class Limiter:
 
     def refill(self, dt: float) -> None:
         """Accrue release credit, capped at ~1s worth so it can't hoard a burst."""
-        self.tokens = min(self.tokens + self.release_rate * dt, self.release_rate)
+        # Releasing one packet costs a whole token, so the cap is never below
+        # 1.0 — otherwise a slow limiter (release_rate < 1) could never release.
+        cap = max(1.0, self.release_rate)
+        self.tokens = min(self.tokens + self.release_rate * dt, cap)

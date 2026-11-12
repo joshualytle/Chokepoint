@@ -31,6 +31,8 @@ minor versions may still move quickly.
   app.
 
 ### Fixed
+- Turrets now fire at their documented `fire_rate`: the cooldown carries the
+  part of a tick it overshot instead of discarding it (guns ran 2-6% slow).
 - A refused edge/node removal no longer reorders a fork's branches (which
   changed where ungated packets and gate routes went).
 - A quelimiter with `release_rate` below 1.0 now releases packets instead of

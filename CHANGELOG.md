@@ -31,6 +31,10 @@ minor versions may still move quickly.
   app.
 
 ### Fixed
+- Turrets now fire at their documented `fire_rate`: the cooldown carries the
+  part of a tick it overshot instead of discarding it (guns ran 2-6% slow).
+- Runaway loadout code (a huge `for` loop, `range(10**15)`, `10 ** 10 ** 10`) is
+  stopped with "your code ran too long" instead of freezing the browser tab.
 - Sandboxed loadout code can no longer change the game's shared registries
   (`GUN_LIBRARY`, `SYNERGIES`, `MAPS`, `MAP_LIST`, `register_gun`/`register_module`)
   or rebind a real module's names (e.g. `DEFAULT_GATE_COST`); reads still work.
@@ -62,6 +66,10 @@ minor versions may still move quickly.
   a read-only view too, so it can't empty the shared registry that way either.
 - The shipped example `loadout.py` uses absolute imports, so it can be pasted
   into the web editor (the sandbox refuses relative imports).
+- Packets stranded by removing a node mid-wave now count as leaked in the
+  per-kind stats and telemetry (not toward game over), so the books balance.
+- Running a lesson's code on desktop now refunds gates and limiters (and
+  modules) along with turrets, so swapping builds no longer loses credits.
 
 ### Notes
 - The desktop build (`python -m chokepoint`) is unchanged and remains the

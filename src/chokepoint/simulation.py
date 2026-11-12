@@ -274,10 +274,43 @@ class World:
         self._overflow()
         self._drain_health(dt)
         self.packets = [p for p in self.packets if not p.dead]
-        for k in KIND_LIST:
-            self.stats[k].inflight = sum(1 for p in self.packets if p.kind == k)
+        self._count_inflight()
         self.telemetry.observe(self, dt)
         self._wave_check()
+
+    def _count_inflight(self) -> None:
+        """Refresh each kind's in-flight count from the live packet list."""
+        for k in KIND_LIST:
+            self.stats[k].inflight = sum(1 for p in self.packets if p.kind == k)
+
+    def drop_orphaned_packets(self) -> int:
+        """Remove packets stranded by a topology edit, counting them as leaked.
+
+        When the player deletes a node mid-wave, any packet queued at it or
+        travelling toward it has nowhere to go. Silently deleting them would break
+        the per-kind books (spawned == handled + leaked + in-flight), so each one
+        is recorded as a leak in ``stats`` and in telemetry (cause ``"removed"``).
+
+        This is deliberately the "stats only" option: it does NOT add to
+        ``self.leaks`` (the MAX_LEAK game-over counter) and costs no health, so
+        the player's own edit can never end the run. Returns how many were dropped.
+        """
+        valid = self.map.nodes
+        kept: list[Packet] = []
+        dropped = 0
+        for p in self.packets:
+            heading_nowhere = p.moving_to is not None and p.moving_to not in valid
+            stranded = p.at not in valid or heading_nowhere
+            if not stranded or p.dead:
+                kept.append(p)      # dead packets were already counted; step() clears them
+                continue
+            p.dead = True
+            self.stats[p.kind].leaked += 1
+            self.telemetry.on_leak(p.kind, p.at, self.wave_idx, "removed", p.wait)
+            dropped += 1
+        self.packets = kept
+        self._count_inflight()      # keep the books balanced right now, not next step
+        return dropped
 
     def _spawn(self, dt: float) -> None:
         if self.intermission > 0:
@@ -338,8 +371,15 @@ class World:
                 None,
             )
             if target is not None:
-                t.cd = 1.0 / t.gun.fire_rate
-                t.fired += 1                    # a shot landed here this tick (UI: working pulse)
+                # Carry the overshoot: the cooldown usually ran out partway
+                # through this tick, so keep that leftover (cd is now <= 0)
+                # instead of resetting to a full interval. Otherwise every shot
+                # waits up to one extra tick and the gun runs below fire_rate.
+                # A busy turret's cd is always > -dt here; an idle one keeps
+                # counting down, so max(..., -dt) caps its banked credit at one
+                # tick -- it can't fire a burst after sitting idle.
+                t.cd = max(t.cd, -dt) + 1.0 / t.gun.fire_rate
+                t.fired += 1                   # a shot landed here this tick (UI: working pulse)
                 target.volume -= t.gun.effective_damage() * t.synergy_mult
                 if target.volume <= 0:
                     target.handled = True

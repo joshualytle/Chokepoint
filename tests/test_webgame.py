@@ -6,12 +6,15 @@ and the placement/economy/resume behaviors that don't live in the pure core.
 """
 
 import json
+import sys
 
 import pytest
 import webgame as wg
 
+from chokepoint import safety
 from chokepoint.arsenal import MODULE_LIBRARY
-from chokepoint.safety import check_code
+from chokepoint.packets import Packet
+from chokepoint.safety import TOO_LONG_MESSAGE, check_code
 
 
 def fresh(map_name="trunk", difficulty="easy"):
@@ -177,6 +180,41 @@ def test_failed_load_reports_the_line_in_player_code():
     assert r["ok"] is False and r["line"] == 4 and "ZeroDivisionError" in r["error"]
 
 
+@pytest.mark.parametrize("src", [
+    # a big loop inside build_loadout: runs AFTER safe_exec returned
+    "def build_loadout(unlocked, slots):\n"
+    "    for i in range(5000):\n"
+    "        pass\n"
+    "    return []\n",
+    # a generator the bridge itself iterates (the parser loop)
+    _ONE_TURRET + "def build_parsers(unlocked, slots):\n"
+                  "    for i in range(5000):\n"
+                  "        yield Parser(*slots[0], handles={'auth'})\n",
+], ids=["build_loadout-loop", "build_parsers-generator"])
+def test_runaway_player_function_is_stopped_and_build_untouched(src, monkeypatch):
+    # The loop finishes quickly without a budget, so this fails fast (not hangs) on
+    # code that has none; a tiny budget stands in for the real one.
+    monkeypatch.setattr(safety, "DEFAULT_STEP_BUDGET", 200)
+    fresh()
+    wg.select_gun("scatter")
+    assert json.loads(wg.place_at(370, 180))["ok"]
+    before_balance = wg._world.bank.balance
+    before_turrets = [(t.gun.name, t.x, t.y) for t in wg._editor.turrets]
+    before_undo = len(wg._undo)
+    trace_before = sys.gettrace()
+
+    r = json.loads(wg.load_loadout(src))
+
+    assert r["ok"] is False and TOO_LONG_MESSAGE in r["error"]
+    assert isinstance(r["line"], int)                  # points the editor at the loop
+    assert wg._world.bank.balance == before_balance
+    assert [(t.gun.name, t.x, t.y) for t in wg._editor.turrets] == before_turrets
+    assert [(t.gun.name, t.x, t.y) for t in wg._world.turrets] == before_turrets
+    assert wg._world.parsers == []
+    assert len(wg._undo) == before_undo
+    assert sys.gettrace() is trace_before               # nothing left tracing World.step
+
+
 def test_editor_export_loads_through_the_bridge():
     # round trip: what the game itself exports must pass its own sandbox
     fresh()
@@ -240,3 +278,17 @@ def test_walkthroughs_and_tutorial_state():
     assert {"basics", "overflow", "routing", "ingest", "upgrades"} <= ids
     assert json.loads(wg.start_walkthrough("routing"))["ok"]
     assert json.loads(wg.tutorial_state())["active"]
+
+
+# ---- build mode ---- #
+def test_removing_a_node_through_the_bridge_keeps_stats_balanced():
+    fresh("delta")
+    w = wg._world
+    for at, moving_to in (("n2", None), ("n1", "n2"), ("n1", None)):
+        w.packets.append(Packet("auth", 12, 12, 60, at=at, moving_to=moving_to))
+        w.stats["auth"].spawned += 1
+    assert json.loads(wg.remove_node("n2"))["ok"]
+    s = w.stats["auth"]
+    assert (s.leaked, s.inflight) == (2, 1)
+    assert s.spawned == s.handled + s.leaked + s.inflight
+    assert w.leaks == 0 and not w.over

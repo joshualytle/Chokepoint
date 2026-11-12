@@ -166,6 +166,24 @@ class ArsenalEditor:
         self.gates = []
         self.limiters = []
 
+    def refund_all(self) -> int:
+        """Sell back everything placed here, then clear. Returns credits refunded.
+
+        Refunds match the single-item remove paths exactly: a turret returns its
+        gun plus every attached module (``gun_cost``), a gate or limiter its own
+        ``cost``. Parsers are not held by the editor, so the caller refunds those.
+        Clearing afterwards means a second call can't refund the same build twice.
+        With no bank attached (free mode) nothing was paid, so 0 is returned.
+        """
+        total = (sum(gun_cost(t.gun) for t in self.turrets)
+                 + sum(g.cost for g in self.gates)
+                 + sum(lim.cost for lim in self.limiters))
+        self.clear()
+        if self.bank is None:
+            return 0
+        self.bank.earn(total)
+        return total
+
     # ---- choosing what to place ---- #
     def select_gun(self, name: str) -> bool:
         """Pick the gun to place next. Returns False if it isn't available."""

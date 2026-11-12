@@ -34,6 +34,7 @@ minor versions may still move quickly.
   app.
 
 ### Fixed
+- Loadout sandbox: strings/lists over 1,000,000 items (`"x" * 10**9`, `s += s` doubling, huge `join`/`sum`) are refused, shared classes/functions can't be changed, and maps are handed out as private copies.
 - Turrets now fire at their documented `fire_rate`: the cooldown carries the
   part of a tick it overshot instead of discarding it (guns ran 2-6% slow).
 - Runaway loadout code (a huge `for` loop, `range(10**15)`, `10 ** 10 ** 10`) is

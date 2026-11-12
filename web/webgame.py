@@ -33,7 +33,7 @@ from chokepoint.maps import MAP_LIST, MAPS
 from chokepoint.metrics import summarize_failure
 from chokepoint.packets import DIFFICULTY_LIST, KINDS
 from chokepoint.parsers import Parser
-from chokepoint.safety import SafetyError, safe_exec
+from chokepoint.safety import SafetyError, safe_exec, step_budget
 from chokepoint.simulation import DWELL_GRACE, MAX_LEAK, QUEUE_CAP, START_HEALTH, World
 from chokepoint.tutorial import Step, Tutorial
 
@@ -144,27 +144,33 @@ def load_loadout(src: str) -> str:
         if "build_loadout" not in ns:
             raise ValueError("define build_loadout(unlocked, slots)")
         unlocked, slots = _world.unlocked(), _world.map.slots
-        turrets = ns["build_loadout"](unlocked, slots)
-        if turrets is None:
-            raise TypeError("build_loadout returned None - did you forget `return turrets`?")
-        editor = ArsenalEditor(unlocked, bank=_world.bank)
-        dropped = editor.seed_purchase(turrets)
-        # optional device builders (gates / limiters / parsers), like the desktop loadout
-        build_gates = ns.get("build_gates")
-        if callable(build_gates):
-            editor.seed_purchase_gates(build_gates(unlocked, slots))
-        build_limiters = ns.get("build_limiters")
-        if callable(build_limiters):
-            editor.seed_purchase_limiters(build_limiters(unlocked, slots))
-        parsers: list[Parser] = []
-        build_parsers = ns.get("build_parsers")
-        if callable(build_parsers):
-            for ps in build_parsers(unlocked, slots):
-                if _world.bank.spend(ps.cost):
-                    parsers.append(ps)
+        # The player's functions run here, after safe_exec has returned, so they
+        # need their own step budget: a huge loop in build_loadout would otherwise
+        # freeze the tab. It also covers generators the player returns, which only
+        # run as seed_purchase / the parser loop below iterate them.
+        with step_budget():
+            turrets = ns["build_loadout"](unlocked, slots)
+            if turrets is None:
+                raise TypeError("build_loadout returned None - did you forget `return turrets`?")
+            editor = ArsenalEditor(unlocked, bank=_world.bank)
+            dropped = editor.seed_purchase(turrets)
+            # optional device builders (gates / limiters / parsers), like the desktop loadout
+            build_gates = ns.get("build_gates")
+            if callable(build_gates):
+                editor.seed_purchase_gates(build_gates(unlocked, slots))
+            build_limiters = ns.get("build_limiters")
+            if callable(build_limiters):
+                editor.seed_purchase_limiters(build_limiters(unlocked, slots))
+            parsers: list[Parser] = []
+            build_parsers = ns.get("build_parsers")
+            if callable(build_parsers):
+                for ps in build_parsers(unlocked, slots):
+                    if _world.bank.spend(ps.cost):
+                        parsers.append(ps)
     except SafetyError as err:
         _restore(pre)
-        # a syntax error inside the sandbox check carries the offending line
+        # a syntax error inside the sandbox check carries the offending line, and so
+        # does a step-budget stop (the line that was running when time ran out)
         line = getattr(err.__cause__, "lineno", None)
         return json.dumps({"ok": False, "error": f"blocked: {err}", "line": line})
     except Exception as err:  # report author errors to the editor, never crash

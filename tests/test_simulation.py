@@ -66,6 +66,70 @@ def test_rebinding_turrets_does_not_grant_free_shots():
     assert t.fired <= t.gun.fire_rate * seconds + 1
 
 
+# ---- fire rate: a busy turret shoots at exactly its documented rate ---- #
+DT = 1 / 60                               # the game's tick
+
+
+def shot_times(gun_name, busy_from=0.0, seconds=30.0):
+    """Run one turret on n1 and return the time of every shot it fires.
+
+    Before `busy_from` the queue is empty (the turret idles); from then on fat
+    packets keep it saturated, so it should fire as fast as its gun allows.
+    """
+    gm = MAPS["trunk"]
+    w = World(gm)
+    gun = make_gun(gun_name)
+    w.set_turrets([Turret(*gm.pos("n1"), gun)])
+    w.intermission = 1e9                  # no wave spawns; we feed n1 by hand
+    kind = sorted(gun.accepts)[0]
+    times: list[float] = []
+    for i in range(round(seconds / DT)):
+        now = i * DT
+        if now >= busy_from:
+            while len(w.queue_at("n1")) < 3:
+                w.packets.append(Packet(kind, 1e9, 1e9, 60.0, at="n1"))
+        w.health = START_HEALTH           # the fat packets age; keep the run alive
+        before = w.turrets[0].fired
+        w.step(DT)
+        times += [now] * (w.turrets[0].fired - before)
+    return times
+
+
+def test_saturated_turret_fires_at_its_nominal_rate():
+    # A cooldown that resets to a full interval throws away the part of a tick
+    # it overshot, so at 60 ticks/s guns fired 2-6% slow (sieve 2.87/s, not 3).
+    for name in ("sieve", "bastion", "scatter", "auditor"):
+        rate = make_gun(name).fire_rate
+        seconds = 30.0
+        actual = len(shot_times(name, seconds=seconds)) / seconds
+        assert abs(actual - rate) / rate < 0.01, (name, actual, rate)
+
+
+def test_idle_turret_does_not_bank_a_burst():
+    # Idle for 5 s, then flooded: the first second of work must not exceed the
+    # gun's rate (plus the one shot it was ready to fire), and no two shots may
+    # land closer together than one interval minus a single tick.
+    for name in ("sieve", "scatter"):
+        rate = make_gun(name).fire_rate
+        times = shot_times(name, busy_from=5.0, seconds=8.0)
+        assert times and times[0] >= 5.0
+        first_second = [s for s in times if s < times[0] + 1.0]
+        assert len(first_second) <= rate + 1, (name, len(first_second))
+        gaps = [b - a for a, b in zip(times, times[1:], strict=False)]
+        assert min(gaps) >= 1.0 / rate - DT - 1e-9, (name, min(gaps))
+
+
+def test_fire_rate_never_exceeded_in_any_one_second_window():
+    # Fire rate is static: carrying the overshoot evens out the timing, it must
+    # never let a turret out-shoot its gun over any 1 s window.
+    for name in ("sieve", "bastion", "scatter"):
+        rate = make_gun(name).fire_rate
+        times = shot_times(name, seconds=20.0)
+        for i, start in enumerate(times):
+            in_window = sum(1 for s in times[i:] if s < start + 1.0)
+            assert in_window <= rate + 1, (name, start, in_window)
+
+
 # ---- coverage / handling ---- #
 def test_covered_kind_gets_handled():
     # a sieve at a node on the route covers auth; auth packets get processed there

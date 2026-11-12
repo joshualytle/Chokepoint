@@ -371,8 +371,15 @@ class World:
                 None,
             )
             if target is not None:
-                t.cd = 1.0 / t.gun.fire_rate
-                t.fired += 1                    # a shot landed here this tick (UI: working pulse)
+                # Carry the overshoot: the cooldown usually ran out partway
+                # through this tick, so keep that leftover (cd is now <= 0)
+                # instead of resetting to a full interval. Otherwise every shot
+                # waits up to one extra tick and the gun runs below fire_rate.
+                # A busy turret's cd is always > -dt here; an idle one keeps
+                # counting down, so max(..., -dt) caps its banked credit at one
+                # tick -- it can't fire a burst after sitting idle.
+                t.cd = max(t.cd, -dt) + 1.0 / t.gun.fire_rate
+                t.fired += 1                   # a shot landed here this tick (UI: working pulse)
                 target.volume -= t.gun.effective_damage() * t.synergy_mult
                 if target.volume <= 0:
                     target.handled = True

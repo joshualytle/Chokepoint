@@ -257,7 +257,9 @@ def _checked_method(obj: Any, name: str, /, *args: Any, **kwargs: Any) -> Any:
         elif name == "replace" and len(args) >= 2 and isinstance(args[0], type(obj)) \
                 and isinstance(args[1], type(obj)):
             old, new = args[0], args[1]
-            count = obj.count(old)     # "" matches len(obj) + 1 times
+            # old has obj's type (checked above); mypy can't narrow via type(obj).
+            # "" matches len(obj) + 1 times.
+            count = obj.count(old)  # type: ignore[arg-type]
             if len(args) > 2 and isinstance(args[2], int) and 0 <= args[2] < count:
                 count = args[2]
             _check_length(len(obj) + count * (len(new) - len(old)))

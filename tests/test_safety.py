@@ -513,7 +513,7 @@ def test_guarded_methods_still_work_every_way_they_can_be_reached():
     ns = safe_exec(
         "a = str.join('-', ['x', 'y'])\n"
         "j = ', '.join\nb = j(str(i) for i in range(3))\n"
-        "c = 'a-b'.replace('-', '+', count=1)\n"
+        "c = 'a-b'.replace('-', '+', 1)\n"   # positional: count= needs Python 3.13+
         "d = list(map(str.ljust, ['a', 'bb'], [3, 3]))\n"
         "l = [1]\nlist.extend(l, (2, 3))\nl.extend(i for i in range(4, 6))\n"
         "l += range(6, 8)\nl[0:0] = [0]\n"

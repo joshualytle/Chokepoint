@@ -16,8 +16,11 @@ Three layers of defense:
     one line of C code where no loop is visible.
   * ``safe_exec`` — exec with a curated, minimal ``__builtins__`` plus a guarded
     ``__import__`` that only resolves the allowlist (handing back shared
-    registries as read-only views), so there is little to reach even if
-    something slips past the AST pass. Its ``range`` refuses absurd lengths.
+    registries as read-only views, and maps as private copies), so there is
+    little to reach even if something slips past the AST pass. Its ``range``
+    refuses absurd lengths. It also rewrites the code so ``*``, ``+``, ``sum``
+    and a few str/list methods refuse to build a string or list longer than
+    MAX_SEQUENCE_LENGTH, and so shared classes/functions can't be changed.
   * ``step_budget`` — counts the lines player code runs and stops it with a
     SafetyError once it passes a budget. On the web the code runs on the browser's
     only thread, so a ``for`` loop over ``range(10**15)`` would freeze the tab just
@@ -33,6 +36,7 @@ from __future__ import annotations
 
 import ast
 import builtins as _builtins
+import copy
 import importlib
 import sys
 import types
@@ -68,6 +72,17 @@ MAX_RANGE_LENGTH = 1_000_000
 # Largest constant exponent allowed in `x ** n`. 10 ** 10 ** 10 is one line, but
 # computing it would take forever in C (again invisible to the step budget).
 MAX_CONST_EXPONENT = 1_000
+
+# Longest string/list/tuple/bytes player code may build in one step. `"x" * 10**9`
+# or doubling `s += s` forty times is a handful of lines, but each one asks C for
+# gigabytes. No loadout comes close: the lessons, the shipped loadout.py and the
+# web starter build nothing longer than a few dozen items, and a 1000 x 1000 grid
+# is 1000 rows of 1000. 1,000,000 matches MAX_RANGE_LENGTH.
+MAX_SEQUENCE_LENGTH = 1_000_000
+
+SEQUENCE_TOO_LONG_MESSAGE = (
+    f"that would make a string or list longer than {MAX_SEQUENCE_LENGTH:,} items"
+    " — is a number you multiply or repeat by too big?")
 
 
 # modules a loadout may import (absolute paths only); everything else is rejected
@@ -143,6 +158,13 @@ _REFUSED_NAMES: dict[str, tuple[str, ...]] = {
     "chokepoint.arsenal": ("register_gun", "register_module"),
 }
 
+# Registries whose ITEMS can be changed too. A read-only MAPS still hands out the
+# real Graph objects, and `MAPS["trunk"].slots.clear()` would edit the map every
+# later game starts from. So the sandbox gets a deep copy (copy.deepcopy copies
+# the items, the items' lists, and so on all the way down) to read - or change -
+# as it likes.
+_COPIED_ITEMS = frozenset({("chokepoint.maps", "MAPS")})
+
 
 def _read_only(value: object) -> object:
     """A read-only stand-in for a shared dict or list registry."""
@@ -161,6 +183,142 @@ def _refuse(func_name: str) -> Callable[..., NoReturn]:
     return refused
 
 
+# ---- size guards: stop a huge string/list BEFORE C is asked to build it ---- #
+# Before compiling, safe_exec rewrites player code so `a * b` becomes a call to
+# _checked_mul(a, b), `a + b` to _checked_add(a, b), and so on (see _Guard below).
+# Each guard works out how long the result would be, refuses past the cap, and
+# otherwise does exactly the original operation - so numbers, and every error an
+# ordinary mistake raises, behave as before.
+_SEQUENCES = (str, bytes, list, tuple)
+
+
+def _check_length(length: int) -> None:
+    if length > MAX_SEQUENCE_LENGTH:
+        raise SafetyError(SEQUENCE_TOO_LONG_MESSAGE)
+
+
+def _repeat_length(a: object, b: object) -> int:
+    """How long `a * b` would be if it repeats a sequence (0 if it doesn't)."""
+    if isinstance(a, _SEQUENCES) and isinstance(b, int):
+        return len(a) * b
+    if isinstance(b, _SEQUENCES) and isinstance(a, int):
+        return len(b) * a
+    return 0
+
+
+def _concat_length(a: object, b: object) -> int:
+    """How long `a + b` would be if it joins two sequences (0 if it doesn't)."""
+    if isinstance(a, _SEQUENCES) and isinstance(b, _SEQUENCES):
+        return len(a) + len(b)
+    return 0
+
+
+def _checked_mul(a: Any, b: Any) -> Any:
+    _check_length(_repeat_length(a, b))
+    return a * b
+
+
+def _checked_add(a: Any, b: Any) -> Any:
+    _check_length(_concat_length(a, b))
+    return a + b
+
+
+# `t *= v` / `t += v` stay in-place operations (a list is changed, not replaced);
+# only the right-hand side goes through these, which check and hand it back.
+def _checked_imul_operand(target: Any, value: Any) -> Any:
+    _check_length(_repeat_length(target, value))
+    return value
+
+
+def _checked_iadd_operand(target: Any, value: Any) -> Any:
+    _check_length(_concat_length(target, value))
+    return value
+
+
+# Methods that can build a huge string/list in one call. Calls to a method with
+# one of these names become _checked_method(obj, "name", *args, **kwargs).
+_GUARDED_METHODS = frozenset({"join", "extend", "replace", "ljust", "rjust", "center",
+                              "zfill"})
+
+
+def _checked_method(obj: Any, name: str, /, *args: Any, **kwargs: Any) -> Any:
+    # The `/` makes obj and name positional-only, so a player's own keyword
+    # argument can never collide with them.
+    method = getattr(obj, name)   # a missing method raises the usual AttributeError
+    if isinstance(obj, (str, bytes)) and not kwargs:
+        if name == "join" and len(args) == 1:
+            parts = list(args[0])   # read the items once, measure them, join the same list
+            sizes = sum(len(p) for p in parts if isinstance(p, _SEQUENCES))
+            _check_length(sizes + len(obj) * max(len(parts) - 1, 0))
+            args = (parts,)
+        elif name in ("ljust", "rjust", "center", "zfill") and args \
+                and isinstance(args[0], int):
+            _check_length(args[0])   # the width IS the length of the result
+        elif name == "replace" and len(args) >= 2 and isinstance(args[0], type(obj)) \
+                and isinstance(args[1], type(obj)):
+            old, new = args[0], args[1]
+            count = obj.count(old)     # "" matches len(obj) + 1 times
+            if len(args) > 2 and isinstance(args[2], int) and 0 <= args[2] < count:
+                count = args[2]
+            _check_length(len(obj) + count * (len(new) - len(old)))
+    elif isinstance(obj, list) and name == "extend" and len(args) == 1 \
+            and isinstance(args[0], _SEQUENCES):
+        _check_length(len(obj) + len(args[0]))
+    return method(*args, **kwargs)
+
+
+def _checked_sum(iterable: Any, /, start: Any = 0) -> Any:
+    """``sum`` for player code: sum(lists, []) joins lists, so measure it first."""
+    if not isinstance(start, _SEQUENCES):
+        return sum(iterable, start)
+    items = list(iterable)
+    _check_length(len(start) + sum(len(i) for i in items if isinstance(i, _SEQUENCES)))
+    return sum(items, start)
+
+
+def _checked_prod(iterable: Any, /, *, start: Any = 1) -> Any:
+    """``math.prod`` for player code: math.prod(["x", 10**9]) is a string repeat."""
+    result = start
+    for item in iterable:
+        result = _checked_mul(result, item)
+    return result
+
+
+# ---- write guard: shared classes and functions are read-only ---- #
+# Player code may set attributes on its own objects (`t.x = 5`), but a class such
+# as Turret is shared by the whole game: `Turret.dps = lambda self: 10**6` would
+# change every turret, in this run and every later one - and the game would then
+# call player code with no step budget around it. So every attribute write or
+# delete (`obj.attr = ...`, `del obj.attr`, `obj.attr += ...`) first passes obj
+# through this check.
+def _writable(obj: Any) -> Any:
+    if isinstance(obj, type):
+        raise SafetyError(f"{obj.__name__} is a class shared by the whole game, so "
+                          "loadout code may not change it; change your own objects")
+    if isinstance(obj, types.FunctionType) and obj.__code__.co_filename != LOADOUT_FILENAME:
+        raise SafetyError(f"{obj.__name__}() is shared by the whole game, so loadout "
+                          "code may not change it")
+    return obj
+
+
+# The names the rewritten code calls the guards by. They contain "<" and ">", so
+# they are not valid Python identifiers: player code can never type, rebind or
+# shadow them. Only the compiler, given a rewritten tree, can refer to them.
+_GUARD_NAMES: dict[str, Callable[..., Any]] = {
+    "<mul>": _checked_mul,
+    "<add>": _checked_add,
+    "<imul>": _checked_imul_operand,
+    "<iadd>": _checked_iadd_operand,
+    "<method>": _checked_method,
+    "<writable>": _writable,
+}
+
+# Module functions swapped for a guarded version in the sandbox's copy of the module.
+_REPLACED_NAMES: dict[str, dict[str, Callable[..., Any]]] = {
+    "math": {"prod": _checked_prod},
+}
+
+
 def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):  # noqa: A002
     allowed = name in ALLOWED_IMPORTS or (name == _FUTURE and bool(fromlist))
     if level != 0 or not allowed:
@@ -172,9 +330,14 @@ def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):  # n
     stand_in = types.ModuleType(name)
     stand_in.__dict__.update(module.__dict__)
     for attr in _READ_ONLY_NAMES.get(name, ()):
-        setattr(stand_in, attr, _read_only(getattr(module, attr)))
+        value = getattr(module, attr)
+        if (name, attr) in _COPIED_ITEMS:
+            value = copy.deepcopy(value)   # a private copy of every item, too
+        setattr(stand_in, attr, _read_only(value))
     for attr in _REFUSED_NAMES.get(name, ()):
         setattr(stand_in, attr, _refuse(attr))
+    for attr, replacement in _REPLACED_NAMES.get(name, {}).items():
+        setattr(stand_in, attr, replacement)
     return stand_in
 
 
@@ -194,7 +357,59 @@ def _safe_builtins() -> dict:
     b = {n: getattr(_builtins, n) for n in _SAFE_BUILTIN_NAMES if hasattr(_builtins, n)}
     b["__import__"] = _guarded_import   # only resolves ALLOWED_IMPORTS
     b["range"] = _capped_range
+    b["sum"] = _checked_sum
+    b.update(_GUARD_NAMES)              # what the rewritten code calls (see _Guard)
     return b
+
+
+def _guard_call(name: str, *args: ast.expr) -> ast.Call:
+    return ast.Call(func=ast.Name(id=name, ctx=ast.Load()), args=list(args), keywords=[])
+
+
+class _Guard(ast.NodeTransformer):
+    """Rewrites player code so size- and write-sensitive operations go through
+    the guards above. An ast.NodeTransformer walks the tree and replaces each node
+    with whatever its visit_<NodeType> method returns."""
+
+    def visit_BinOp(self, node: ast.BinOp) -> ast.expr:
+        self.generic_visit(node)     # rewrite the operands first (a * b * c nests)
+        name = {ast.Mult: "<mul>", ast.Add: "<add>"}.get(type(node.op))
+        if name is None:
+            return node
+        return ast.copy_location(_guard_call(name, node.left, node.right), node)
+
+    def visit_AugAssign(self, node: ast.AugAssign) -> ast.AugAssign:
+        name = {ast.Mult: "<imul>", ast.Add: "<iadd>"}.get(type(node.op))
+        # a second copy of the target, to READ it for the size check. (For
+        # `d[k()] += v` that evaluates k() twice; loadouts don't rely on that.)
+        current = copy.deepcopy(node.target)
+        current.ctx = ast.Load()
+        self.generic_visit(node)
+        if name is not None:
+            node.value = ast.copy_location(
+                _guard_call(name, self.visit(current), node.value), node.value)
+        return node
+
+    def visit_Attribute(self, node: ast.Attribute) -> ast.Attribute:
+        self.generic_visit(node)
+        if isinstance(node.ctx, (ast.Store, ast.Del)):
+            node.value = ast.copy_location(_guard_call("<writable>", node.value), node.value)
+        return node
+
+    def visit_Call(self, node: ast.Call) -> ast.Call:
+        self.generic_visit(node)
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr in _GUARDED_METHODS:
+            call = _guard_call("<method>", func.value, ast.Constant(func.attr), *node.args)
+            call.keywords = node.keywords
+            return ast.copy_location(call, node)
+        return node
+
+
+def _guarded_compile(src: str) -> types.CodeType:
+    tree = _Guard().visit(ast.parse(src))
+    ast.fix_missing_locations(tree)   # give the new nodes line numbers
+    return compile(tree, LOADOUT_FILENAME, "exec")
 
 
 def _check_power(node: ast.BinOp | ast.AugAssign) -> None:
@@ -330,7 +545,7 @@ def safe_exec(src: str, api: dict | None = None, *, max_steps: int | None = None
     ns: dict = {"__builtins__": _safe_builtins(), "__name__": "loadout", "__package__": None}
     if api:
         ns.update(api)
-    code = compile(src, LOADOUT_FILENAME, "exec")
+    code = _guarded_compile(src)
     with step_budget(max_steps):
         exec(code, ns)  # noqa: S102 - checked + locked down above
     return ns

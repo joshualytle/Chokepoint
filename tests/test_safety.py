@@ -261,7 +261,7 @@ def test_imported_registries_can_still_be_read():
     assert ns["gun_names"] == sorted(arsenal.GUN_LIBRARY)
     assert ns["n_synergies"] == len(arsenal.SYNERGIES)
     assert ns["synergy_names"] == [s.name for s in arsenal.SYNERGIES]
-    assert ns["trunk"] is maps.MAPS["trunk"] and ns["has_trunk"]
+    assert ns["trunk"] == maps.MAPS["trunk"] and ns["has_trunk"]   # a private copy
     assert ns["map_names"] == sorted(maps.MAPS)
     assert ns["first_map"] == maps.MAP_LIST[0] and ns["n_maps"] == len(maps.MAP_LIST)
 
@@ -450,3 +450,128 @@ def test_huge_ranges_are_refused(bad):
 def test_ranges_up_to_the_cap_still_work():
     ns = safe_exec("n = len(range(1000000))\nback = list(range(5, 0, -1))\n")
     assert ns["n"] == 1_000_000 and ns["back"] == [5, 4, 3, 2, 1]
+
+
+# ---- huge strings/lists built in one C call (the step budget can't see them) ---- #
+# Each of these would try to allocate gigabytes (or hang) without a size cap. They
+# must be stopped before the allocation happens, with a clear message.
+@pytest.mark.parametrize("bad", [
+    "x = 'x' * 10 ** 9\n",
+    "x = [0] * 10 ** 9\n",
+    "x = 10 ** 9 * (0,)\n",                          # repeat count on the left
+    "x = b'x' * 10 ** 9\n",
+    "s = 'ab'\nx = s * (10 ** 5) * (10 ** 5)\n",     # a variable, grown in two steps
+    "n = 10 ** 9\nx = [None] * n\n",
+    "s = 'x'\ns *= 10 ** 9\n",                       # in-place repeat
+    "s = 'x'\nfor i in range(40):\n    s += s\n",    # doubling under the step budget
+    "s = 'x'\nfor i in range(40):\n    s = s + s\n",
+    "l = [0]\nfor i in range(40):\n    l += l\n",
+    "d = {'k': [0]}\nfor i in range(40):\n    d['k'] += d['k']\n",
+    "l = [0]\nfor i in range(40):\n    l.extend(l)\n",
+    "s = 'x' * 1000\nx = s.join([s] * 1000)\n",       # each piece is fine, the join is not
+    "s = 'x' * 1000\nx = s.replace('', s)\n",
+    "x = 'x'.ljust(10 ** 9)\n",
+    "big = [0] * 1000000\nx = sum([big] * 1000, [])\n",
+    "import math\nx = math.prod(['x', 10 ** 9])\n",
+])
+def test_huge_sequences_are_refused(bad):
+    with pytest.raises(SafetyError, match="longer than"):
+        safe_exec(bad)
+
+
+def test_huge_sequence_in_a_player_function_is_refused():
+    ns = safe_exec("def build_loadout(u, s):\n    return [0] * len(s) ** 9\n")
+    with pytest.raises(SafetyError, match="longer than"), step_budget():
+        ns["build_loadout"](set(), [(0, 0)] * 10)
+
+
+def test_sequences_up_to_the_cap_still_work():
+    ns = safe_exec(
+        "row = [0] * 1000\n"
+        "grid = [[0] * 1000 for i in range(10)]\n"
+        "line = '-' * 40\n"
+        "big = 'x' * 1000000\n"
+        "pair = (1, 2) * 3\n"
+        "words = ', '.join(['a', 'b'])\n"
+        "label = 'gun'.ljust(8) + '|'\n"
+        "msg = 'a-b'.replace('-', '+')\n"
+        "nums = [1, 2]\nnums += [3]\nnums.extend([4])\nnums *= 2\n"
+        "flat = sum([[1], [2]], [])\n"
+        "import math\nfactor = math.prod([2, 3, 4])\n"
+        "total = 2 * 3 + 4.5 * 2\n")
+    assert ns["row"] == [0] * 1000 and len(ns["grid"]) == 10 and len(ns["big"]) == 1_000_000
+    assert ns["line"] == "-" * 40 and ns["pair"] == (1, 2, 1, 2, 1, 2)
+    assert ns["words"] == "a, b" and ns["label"] == "gun     |" and ns["msg"] == "a+b"
+    assert ns["nums"] == [1, 2, 3, 4, 1, 2, 3, 4] and ns["flat"] == [1, 2]
+    assert ns["factor"] == 24 and ns["total"] == 15.0
+
+
+@pytest.mark.parametrize(("src", "err"), [
+    ("x = 'a' + 1\n", TypeError),
+    ("x = [1] * 'a'\n", TypeError),
+    ("x = [].join([])\n", AttributeError),
+])
+def test_ordinary_mistakes_raise_the_same_errors(src, err):
+    # the size guards must not change what an ordinary mistake raises
+    with pytest.raises(err):
+        safe_exec(src)
+
+
+# ---- shared classes and maps: reads work, writes can't leak into the game ---- #
+def _class_state() -> dict:
+    return {"Turret": dict(vars(Turret)), "Gun": dict(vars(arsenal.Gun)),
+            "Graph": dict(vars(maps.Graph)),
+            "sieve": dict(vars(arsenal.GUN_LIBRARY["sieve"])),
+            "make_gun": dict(vars(make_gun))}
+
+
+@pytest.mark.parametrize("bad", [
+    "from chokepoint.arsenal import Turret\nTurret.dps = lambda self: 10 ** 6\n",
+    "from chokepoint.arsenal import Gun\nGun.fire_rate = 99\n",
+    "from chokepoint.maps import Graph\ndel Graph.copy\n",
+    "import chokepoint.maps\nchokepoint.Graph.copy = None\n",
+    "from chokepoint.arsenal import Turret\nTurret.cd += 1\n",
+    "from chokepoint.arsenal import Turret\nfor Turret.cd in [5]:\n    pass\n",
+    "from chokepoint.arsenal import Turret\nTurret.cd, x = 5, 1\n",
+    "from chokepoint.arsenal import GUN_LIBRARY\nGUN_LIBRARY['sieve'].tag = 1\n",
+    "Turret.cd = 5\n",                                 # a class injected by the UI's api
+    "make_gun.tag = 1\n",
+])
+def test_shared_classes_and_functions_cannot_be_changed(bad):
+    before = _class_state()
+    with pytest.raises(SafetyError, match="shared"):
+        safe_exec(bad, _API)
+    assert _class_state() == before
+
+
+def test_own_objects_and_functions_can_still_be_changed():
+    ns = safe_exec(
+        "t = Turret(0, 0, gun=make_gun('sieve'))\n"
+        "t.x = 5\n"
+        "t.gun.damage += 1\n"
+        "def helper():\n    return 1\n"
+        "helper.note = 'mine'\n"
+        "import math\nmath.tau = 6\n", _API)
+    assert ns["t"].x == 5 and ns["t"].gun.damage == make_gun("sieve").damage + 1
+    assert ns["helper"].note == "mine" and math.tau != 6
+
+
+def _map_state() -> dict:
+    return {name: (g.source, dict(g.nodes), {k: list(v) for k, v in g.adj.items()},
+                   list(g.slots))
+            for name, g in maps.MAPS.items()}
+
+
+@pytest.mark.parametrize("bad", [
+    "from chokepoint.maps import MAPS\nMAPS['trunk'].slots.clear()\n",
+    "from chokepoint.maps import MAPS\nMAPS['trunk'].slots.append((1, 1))\n",
+    "from chokepoint.maps import MAPS\nMAPS['trunk'].nodes.clear()\n",
+    "from chokepoint.maps import MAPS\nMAPS['trunk'].adj['n0'].clear()\n",
+    "from chokepoint.maps import MAPS\nMAPS['trunk'].add_node(1, 1)\n",
+    "from chokepoint.maps import MAPS\nMAPS['trunk'].source = 'nowhere'\n",
+    "import chokepoint.maps\nchokepoint.MAPS['trunk'].slots[0] = (9, 9)\n",
+])
+def test_a_maps_own_nodes_and_slots_cannot_be_changed(bad):
+    before = _map_state()
+    safe_exec(bad)        # allowed: it only changes the loadout's private copy
+    assert _map_state() == before

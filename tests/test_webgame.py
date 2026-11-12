@@ -142,6 +142,17 @@ def test_load_loadout_deploys_and_reports_error_line():
     assert bad["ok"] is False and bad["line"] == 2
 
 
+def test_loadout_changing_its_slots_list_does_not_change_the_map():
+    fresh()
+    before = list(wg._world.map.slots)
+    r = json.loads(wg.load_loadout(
+        "def build_loadout(unlocked, slots):\n"
+        "    first = slots.pop(0)\n"
+        "    slots.clear()\n"
+        "    return [Turret(*first, gun=make_gun('sieve'))]\n"))
+    assert r["ok"] and wg._world.map.slots == before
+
+
 _ONE_TURRET = ("def build_loadout(unlocked, slots):\n"
                "    return [Turret(*slots[0], gun=make_gun('sieve'))]\n")
 

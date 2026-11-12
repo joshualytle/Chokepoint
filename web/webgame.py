@@ -143,7 +143,9 @@ def load_loadout(src: str) -> str:
         ns = safe_exec(src, _LOADOUT_API)   # sandboxed: no arbitrary imports / escapes
         if "build_loadout" not in ns:
             raise ValueError("define build_loadout(unlocked, slots)")
-        unlocked, slots = _world.unlocked(), _world.map.slots
+        # a copy of the slots: the player may change the list it is handed
+        # (slots.pop(), slots.clear()) without editing the map's own slots
+        unlocked, slots = _world.unlocked(), list(_world.map.slots)
         # The player's functions run here, after safe_exec has returned, so they
         # need their own step budget: a huge loop in build_loadout would otherwise
         # freeze the tab. It also covers generators the player returns, which only

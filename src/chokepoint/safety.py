@@ -38,9 +38,10 @@ import ast
 import builtins as _builtins
 import copy
 import importlib
+import re
 import sys
 import types
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Collection, Iterable, Iterator
 from contextlib import contextmanager
 from typing import Any, NoReturn
 
@@ -223,6 +224,40 @@ def _checked_add(a: Any, b: Any) -> Any:
     return a + b
 
 
+def _measured(items: Any) -> Any:
+    """``items`` in a form whose len() is known and under the cap.
+
+    Anything with a length (list, range, set, dict, str ...) is returned as is. A
+    generator, map() or zip() has no length until it is read, so it is read into
+    a list here - one item at a time, stopping as soon as it passes the cap - and
+    that list is returned for the caller to use instead (a generator can only be
+    read once). Anything that isn't iterable at all is returned untouched, so the
+    real operation raises its usual TypeError.
+    """
+    if isinstance(items, Collection):
+        _check_length(len(items))
+        return items
+    if not isinstance(items, Iterable):
+        return items
+    out: list[Any] = []
+    for item in items:
+        out.append(item)
+        if len(out) > MAX_SEQUENCE_LENGTH:
+            raise SafetyError(SEQUENCE_TOO_LONG_MESSAGE)
+    return out
+
+
+def _grown_list(target: Any, value: Any) -> Any:
+    """For a list growing by ``value`` (+=, extend, slice assignment): check the
+    new length and hand back ``value`` (read into a list if it had no length)."""
+    if not isinstance(target, list):
+        return value
+    value = _measured(value)
+    if isinstance(value, Collection):
+        _check_length(len(target) + len(value))
+    return value
+
+
 # `t *= v` / `t += v` stay in-place operations (a list is changed, not replaced);
 # only the right-hand side goes through these, which check and hand it back.
 def _checked_imul_operand(target: Any, value: Any) -> Any:
@@ -232,48 +267,104 @@ def _checked_imul_operand(target: Any, value: Any) -> Any:
 
 def _checked_iadd_operand(target: Any, value: Any) -> Any:
     _check_length(_concat_length(target, value))
-    return value
+    return _grown_list(target, value)   # `l += range(...)` / `l += gen` too
 
 
-# Methods that can build a huge string/list in one call. Calls to a method with
-# one of these names become _checked_method(obj, "name", *args, **kwargs).
+def _checked_slice_value(target: Any, value: Any) -> Any:
+    """`l[a:b] = value` can grow l by len(value): check it like extend."""
+    return _grown_list(target, value)
+
+
+def _checked_star(value: Any) -> Any:
+    """`[*a, *a]` builds a list from a's items: read a, under the cap."""
+    return _measured(value)
+
+
+# Methods that can build a huge string/list in one call. EVERY read of an
+# attribute with one of these names - `s.join(...)`, `j = s.join`, `str.join` -
+# becomes _guarded_attribute(obj, "join"), which hands back a checked version.
 _GUARDED_METHODS = frozenset({"join", "extend", "replace", "ljust", "rjust", "center",
                               "zfill"})
+_WIDTH_METHODS = frozenset({"ljust", "rjust", "center", "zfill"})
+_GUARDED_TYPES = (str, bytes, list)
 
 
-def _checked_method(obj: Any, name: str, /, *args: Any, **kwargs: Any) -> Any:
-    # The `/` makes obj and name positional-only, so a player's own keyword
-    # argument can never collide with them.
-    method = getattr(obj, name)   # a missing method raises the usual AttributeError
-    if isinstance(obj, (str, bytes)) and not kwargs:
+def _check_call(obj: Any, name: str, args: tuple[Any, ...],
+                kwargs: dict[str, Any]) -> tuple[Any, ...]:
+    """Check one call of ``obj.name(*args, **kwargs)``; returns the args to use."""
+    if isinstance(obj, (str, bytes)):
         if name == "join" and len(args) == 1:
-            parts = list(args[0])   # read the items once, measure them, join the same list
-            sizes = sum(len(p) for p in parts if isinstance(p, _SEQUENCES))
-            _check_length(sizes + len(obj) * max(len(parts) - 1, 0))
-            args = (parts,)
-        elif name in ("ljust", "rjust", "center", "zfill") and args \
-                and isinstance(args[0], int):
-            _check_length(args[0])   # the width IS the length of the result
-        elif name == "replace" and len(args) >= 2 and isinstance(args[0], type(obj)) \
-                and isinstance(args[1], type(obj)):
-            old, new = args[0], args[1]
-            # old has obj's type (checked above); mypy can't narrow via type(obj).
-            # "" matches len(obj) + 1 times.
-            count = obj.count(old)  # type: ignore[arg-type]
-            if len(args) > 2 and isinstance(args[2], int) and 0 <= args[2] < count:
-                count = args[2]
-            _check_length(len(obj) + count * (len(new) - len(old)))
-    elif isinstance(obj, list) and name == "extend" and len(args) == 1 \
-            and isinstance(args[0], _SEQUENCES):
-        _check_length(len(obj) + len(args[0]))
-    return method(*args, **kwargs)
+            parts = _measured(args[0])
+            if isinstance(parts, Collection):
+                sizes = sum(len(p) for p in parts if isinstance(p, _SEQUENCES))
+                _check_length(sizes + len(obj) * max(len(parts) - 1, 0))
+                return (parts,)
+        elif name in _WIDTH_METHODS:
+            width = args[0] if args else kwargs.get("width")
+            if isinstance(width, int):
+                _check_length(width)   # the width IS the length of the result
+        elif name == "replace":
+            old = args[0] if args else kwargs.get("old")
+            new = args[1] if len(args) > 1 else kwargs.get("new")
+            limit = args[2] if len(args) > 2 else kwargs.get("count", -1)
+            if isinstance(old, type(obj)) and isinstance(new, type(obj)):
+                # old has obj's type (checked above); mypy can't narrow via type(obj).
+                # "" matches len(obj) + 1 times.
+                count = obj.count(old)  # type: ignore[arg-type]
+                if isinstance(limit, int) and 0 <= limit < count:
+                    count = limit
+                _check_length(len(obj) + count * (len(new) - len(old)))
+    elif isinstance(obj, list) and name == "extend" and len(args) == 1:
+        return (_grown_list(obj, args[0]),)
+    return args
+
+
+def _guarded_attribute(obj: Any, name: str) -> Any:
+    """``obj.name`` for one of _GUARDED_METHODS, wrapped so every call is checked.
+
+    Two shapes: a bound method (``s.join``: obj is the string) and an unbound one
+    (``str.join``: obj is the class, and the string comes as the first argument).
+    Any other object's attribute of the same name is handed back unchanged.
+    """
+    method = getattr(obj, name)   # a missing attribute raises the usual AttributeError
+    if isinstance(obj, _GUARDED_TYPES):
+        def bound(*args: Any, **kwargs: Any) -> Any:
+            return method(*_check_call(obj, name, args, kwargs), **kwargs)
+        return bound
+    if isinstance(obj, type) and issubclass(obj, _GUARDED_TYPES):
+        def unbound(*args: Any, **kwargs: Any) -> Any:
+            if args and isinstance(args[0], obj):
+                args = (args[0], *_check_call(args[0], name, args[1:], kwargs))
+            return method(*args, **kwargs)
+        return unbound
+    return method
+
+
+# `"%100000000d" % 5` pads to the width given in the format: check every width
+# and precision written in it, and each number fed to a `*` width.
+_PERCENT_FIELD = re.compile(r"%(?:\([^)]*\))?[-+ #0]*(\*|\d+)?(?:\.(\*|\d+))?")
+
+
+def _checked_mod(a: Any, b: Any) -> Any:
+    if isinstance(a, (str, bytes)):
+        fmt = a if isinstance(a, str) else a.decode("latin-1")
+        fields = list(_PERCENT_FIELD.finditer(fmt))
+        for match in fields:
+            for size in match.groups():
+                if size and size != "*":   # more than 7 digits is over the cap anyway
+                    _check_length(MAX_SEQUENCE_LENGTH + 1 if len(size) > 7 else int(size))
+        if any("*" in match.groups() for match in fields):
+            for value in (b if isinstance(b, tuple) else (b,)):
+                if isinstance(value, int):
+                    _check_length(abs(value))
+    return a % b
 
 
 def _checked_sum(iterable: Any, /, start: Any = 0) -> Any:
     """``sum`` for player code: sum(lists, []) joins lists, so measure it first."""
     if not isinstance(start, _SEQUENCES):
         return sum(iterable, start)
-    items = list(iterable)
+    items = _measured(iterable)
     _check_length(len(start) + sum(len(i) for i in items if isinstance(i, _SEQUENCES)))
     return sum(items, start)
 
@@ -311,7 +402,10 @@ _GUARD_NAMES: dict[str, Callable[..., Any]] = {
     "<add>": _checked_add,
     "<imul>": _checked_imul_operand,
     "<iadd>": _checked_iadd_operand,
-    "<method>": _checked_method,
+    "<mod>": _checked_mod,
+    "<attr>": _guarded_attribute,
+    "<slice>": _checked_slice_value,
+    "<star>": _checked_star,
     "<writable>": _writable,
 }
 
@@ -375,7 +469,7 @@ class _Guard(ast.NodeTransformer):
 
     def visit_BinOp(self, node: ast.BinOp) -> ast.expr:
         self.generic_visit(node)     # rewrite the operands first (a * b * c nests)
-        name = {ast.Mult: "<mul>", ast.Add: "<add>"}.get(type(node.op))
+        name = {ast.Mult: "<mul>", ast.Add: "<add>", ast.Mod: "<mod>"}.get(type(node.op))
         if name is None:
             return node
         return ast.copy_location(_guard_call(name, node.left, node.right), node)
@@ -386,25 +480,48 @@ class _Guard(ast.NodeTransformer):
         # `d[k()] += v` that evaluates k() twice; loadouts don't rely on that.)
         current = copy.deepcopy(node.target)
         current.ctx = ast.Load()
+        target = node.target
+        # `l[:0] += more` writes the grown slice back into l: check l's new length too
+        container = copy.deepcopy(target.value) if name == "<iadd>" \
+            and isinstance(target, ast.Subscript) and isinstance(target.slice, ast.Slice) \
+            else None
         self.generic_visit(node)
         if name is not None:
             node.value = ast.copy_location(
                 _guard_call(name, self.visit(current), node.value), node.value)
+        if container is not None:
+            node.value = ast.copy_location(
+                _guard_call("<slice>", self.visit(container), node.value), node.value)
         return node
 
-    def visit_Attribute(self, node: ast.Attribute) -> ast.Attribute:
+    def visit_Attribute(self, node: ast.Attribute) -> ast.expr:
         self.generic_visit(node)
         if isinstance(node.ctx, (ast.Store, ast.Del)):
             node.value = ast.copy_location(_guard_call("<writable>", node.value), node.value)
+        elif node.attr in _GUARDED_METHODS:
+            # any READ of s.join / str.join / l.extend ..., called right away or
+            # kept for later, gets the checked version
+            call = _guard_call("<attr>", node.value, ast.Constant(node.attr))
+            return ast.copy_location(call, node)
         return node
 
-    def visit_Call(self, node: ast.Call) -> ast.Call:
+    def visit_Assign(self, node: ast.Assign) -> ast.Assign:
+        # `l[a:b] = value` (a slice on the left) grows l by len(value)
+        sliced = [t for t in node.targets
+                  if isinstance(t, ast.Subscript) and isinstance(t.slice, ast.Slice)]
+        container = copy.deepcopy(sliced[0].value) if len(node.targets) == 1 and sliced \
+            else None
         self.generic_visit(node)
-        func = node.func
-        if isinstance(func, ast.Attribute) and func.attr in _GUARDED_METHODS:
-            call = _guard_call("<method>", func.value, ast.Constant(func.attr), *node.args)
-            call.keywords = node.keywords
-            return ast.copy_location(call, node)
+        if container is not None:
+            node.value = ast.copy_location(
+                _guard_call("<slice>", self.visit(container), node.value), node.value)
+        return node
+
+    def visit_Starred(self, node: ast.Starred) -> ast.Starred:
+        # `[*a, *a]` reads a's items: check them (only when reading, not `x, *y = ...`)
+        self.generic_visit(node)
+        if isinstance(node.ctx, ast.Load):
+            node.value = ast.copy_location(_guard_call("<star>", node.value), node.value)
         return node
 
 

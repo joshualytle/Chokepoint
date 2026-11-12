@@ -479,6 +479,54 @@ def test_huge_sequences_are_refused(bad):
         safe_exec(bad)
 
 
+@pytest.mark.parametrize("bad", [
+    # unbound calls through the class: the string/list comes in as an argument
+    "x = str.join('x' * 10000, ['a'] * 10000)\n",
+    "x = str.ljust('a', 10 ** 8)\n",
+    "l = [0] * 1000000\nlist.extend(l, l)\n",
+    # a method kept as a value and called later
+    "j = ('x' * 10000).join\nx = j(['a'] * 10000)\n",
+    "f = 'a'.ljust\nx = f(10 ** 8)\n",
+    "x = list(map(str.join, ['x' * 10000], [['a'] * 10000]))\n",
+    # keyword arguments
+    "x = ('a' * 10000).replace('a', 'b' * 10000, count=-1)\n",
+    # growing a list from things that aren't lists/strings/tuples
+    "l = []\nfor i in range(20):\n    l.extend(range(1000000))\n",
+    "l = []\nfor i in range(20):\n    l += range(1000000)\n",
+    "l = []\nfor i in range(20):\n    l[0:0] = range(1000000)\n",
+    "l = []\nfor i in range(20):\n    l[:0] += range(1000000)\n",
+    "l = []\nfor i in range(20):\n    l.extend(zip(range(1000000)))\n",
+    "l = []\nfor i in range(20):\n    l += map(abs, range(1000000))\n",
+    "l = []\nfor i in range(20):\n    l += set(range(1000000))\n",
+    "l = [0] * 1000000\nfor i in range(20):\n    l = [*l, *l]\n",
+    # %-format widths
+    "x = '%100000000d' % 5\n",
+    "x = '%.100000000f' % 5\n",
+    "x = '%*d' % (10 ** 8, 5)\n",
+])
+def test_reviewed_bypasses_of_the_size_cap_are_refused(bad):
+    with pytest.raises(SafetyError, match="longer than"):
+        safe_exec(bad)
+
+
+def test_guarded_methods_still_work_every_way_they_can_be_reached():
+    ns = safe_exec(
+        "a = str.join('-', ['x', 'y'])\n"
+        "j = ', '.join\nb = j(str(i) for i in range(3))\n"
+        "c = 'a-b'.replace('-', '+', count=1)\n"
+        "d = list(map(str.ljust, ['a', 'bb'], [3, 3]))\n"
+        "l = [1]\nlist.extend(l, (2, 3))\nl.extend(i for i in range(4, 6))\n"
+        "l += range(6, 8)\nl[0:0] = [0]\n"
+        "e = [*l, *'ab']\n"
+        "f = '%5d|%-3s|%.2f|%*d' % (7, 'x', 1.5, 3, 4)\n"
+        "g = 7 % 3\n"
+        "h = '%s * %s' % (2000000, 3)\n")
+    assert ns["a"] == "x-y" and ns["b"] == "0, 1, 2" and ns["c"] == "a+b"
+    assert ns["d"] == ["a  ", "bb "] and ns["l"] == [0, 1, 2, 3, 4, 5, 6, 7]
+    assert ns["e"] == [0, 1, 2, 3, 4, 5, 6, 7, "a", "b"]
+    assert ns["f"] == "    7|x  |1.50|  4" and ns["g"] == 1 and ns["h"] == "2000000 * 3"
+
+
 def test_huge_sequence_in_a_player_function_is_refused():
     ns = safe_exec("def build_loadout(u, s):\n    return [0] * len(s) ** 9\n")
     with pytest.raises(SafetyError, match="longer than"), step_budget():

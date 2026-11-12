@@ -173,7 +173,8 @@ def test_snippet_runs_in_the_web_sandbox(case):
 def test_snippet_runs_as_a_desktop_loadout(case):
     name, h = _coded_hints()[case]
     ns: dict = {}
-    exec(compile(_loadout_source(h.code, h.code_in), "<loadout>", "exec"), ns)
+    src = compile(_loadout_source(h.code, h.code_in), "<loadout>", "exec")
+    exec(src, ns)  # noqa: S102 - the desktop loads loadout.py this way
     built = ns[h.code_in](set(), MAPS["switchback"].slots)
     assert len(built) == 1 and isinstance(built[0], _TYPES[h.code_in]), name
 

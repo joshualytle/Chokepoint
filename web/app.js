@@ -49,6 +49,7 @@ let levelBreak = null;                     // {cleared, next, count} between-lev
 let endless = false;                       // keep running through waves automatically
 let pinnedCoach = null;                    // a danger/warn hint that persists until fixed/dismissed
 let coachMute = "";                        // text the user dismissed (don't re-pin until it changes)
+let coachCodeOpen = false;                 // coach "fix in Python" snippet expanded?
 
 const DEFAULT_LOADOUT = `# The board starts empty (you have full credits).
 # Place turrets by clicking a gun in the palette, then a node on the board —
@@ -486,6 +487,14 @@ function wireUI() {
       showPlace("walkthrough started — follow the card ▸", true);
       return;
     }
+    const codeTog = e.target.closest(".coach-code-toggle");
+    if (codeTog) { coachCodeOpen = !coachCodeOpen; if (snap) { lastCoachHtml = ""; renderCoach(snap); } return; }
+    const copy = e.target.closest(".insp-copy");
+    if (copy) {
+      copyText(copy.dataset.code);
+      copy.textContent = "✓ copied"; setTimeout(() => { copy.textContent = "⧉ copy"; }, 1200);
+      return;
+    }
     const b = e.target.closest(".coach-show");
     if (!b) return;
     if (b.dataset.editor) {
@@ -818,9 +827,9 @@ function escapeHtml(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "
 function escapeAttr(s) { return escapeHtml(s).replace(/"/g, "&quot;").replace(/\n/g, "&#10;"); }
 function copyText(t) { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).catch(() => {}); }
 function ichip(k, col) { return `<span class="k-chip"><i class="sw" style="background:${rgb(col)}"></i>${k}</span>`; }
-function codeBlock(code) {
+function codeBlock(code, label = "equivalent Python") {
   return `<div class="insp-code">
-    <div class="insp-code-head">equivalent Python<button class="insp-copy" data-code="${escapeAttr(code)}">⧉ copy</button></div>
+    <div class="insp-code-head">${label}<button class="insp-copy" data-code="${escapeAttr(code)}">⧉ copy</button></div>
     <pre>${escapeHtml(code)}</pre></div>`;
 }
 
@@ -1392,6 +1401,11 @@ function coachHtml(s) {
   const learnBtn = wt && !wtDone.has(wt.id)
     ? `<button class="coach-learn" data-wt="${wt.id}">🎓 learn: ${wt.title}</button>`
     : "";
+  // the fix as Python, folded by default so the card stays short on a phone
+  const codeHtml = h.code
+    ? `<button class="coach-code-toggle">${coachCodeOpen ? "▾ hide" : "▸ show"} the fix in Python</button>
+       ${coachCodeOpen ? codeBlock(h.code, `paste inside ${escapeHtml(h.code_in)}()`) : ""}`
+    : "";
   const pinTag = pinned && (!live || live.text !== h.text)
     ? `<span class="coach-pinned" title="Still showing this until you fix or dismiss it">📌 pinned</span>` : "";
   return `<div class="coach ${pinned ? "is-pinned" : ""}" style="border-color:${lc}">
@@ -1402,6 +1416,7 @@ function coachHtml(s) {
     ${h.why ? `<div class="coach-line"><b>WHY</b> ${h.why}</div>` : ""}
     ${h.fix ? `<div class="coach-line coach-fix"><b>FIX</b> ${h.fix}</div>` : ""}
     ${h.concept ? `<div class="coach-concept">concept: ${h.concept}</div>` : ""}
+    ${codeHtml}
     <div class="coach-foot">${pinTag}${showBtn}${learnBtn}</div>
   </div>`;
 }

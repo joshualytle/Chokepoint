@@ -641,7 +641,8 @@ def snapshot() -> dict:
     upcoming = [{"kind": k, "n": n, "color": list(KINDS[k]["color"])}
                 for k, n in w.upcoming_kinds().items()]
     coach = [{"text": h.text, "level": h.level, "why": h.why, "fix": h.fix,
-              "concept": h.concept} for h in coaching(w)[:4]]
+              "concept": h.concept, "code": h.code, "code_in": h.code_in}
+             for h in coaching(w)[:4]]
     return {
         "map": m.name, "wave": w.level, "difficulty": w.difficulty,
         "health": round(w.health, 1), "max_health": START_HEALTH,

@@ -23,6 +23,9 @@ minor versions may still move quickly.
   builds, turrets show a processing beam/burst, and edges show flow direction.
 - **Achievements**, per-walkthrough completion tracking, a per-level pause with
   an optional endless mode, undo, and browser persistence of your build.
+- **Coach shows the fix in Python**: each hint's why names the pipeline idea
+  (coverage gap, backpressure, dwell, typed routing), and fixable hints carry a
+  tested snippet to paste into the named `loadout.py` function.
 
 ### Changed
 - Turrets are placed and dragged freely (with collision boundaries so they can't

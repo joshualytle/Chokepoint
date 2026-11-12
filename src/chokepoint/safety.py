@@ -36,9 +36,9 @@ import builtins as _builtins
 import importlib
 import sys
 import types
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, NoReturn
 
 
 class SafetyError(ValueError):
@@ -126,12 +126,39 @@ _FUTURE = "__future__"
 
 
 # Shared registries a loadout may READ but must not change. Importing the module
-# hands back a stand-in whose registry is a read-only view (a MappingProxyType:
-# lookups, `in` and iteration work; .clear() and item assignment do not). The
-# game's own imports never come through here, so they still see the real dict.
+# hands back a stand-in where each one is read-only: a dict becomes a
+# MappingProxyType (a live read-only view: lookups, `in` and iteration work;
+# .clear() and item assignment do not) and a list becomes a tuple copy. The
+# game's own imports never come through here, so they still see the real objects.
 _READ_ONLY_NAMES: dict[str, tuple[str, ...]] = {
-    "chokepoint.arsenal": ("MODULE_LIBRARY",),
+    "chokepoint.arsenal": ("MODULE_LIBRARY", "GUN_LIBRARY", "SYNERGIES"),
+    "chokepoint.maps": ("MAPS", "MAP_LIST"),
 }
+
+# Registration functions that write into those registries. Copying them onto the
+# stand-in is not enough: a function looks names up in the module it was DEFINED
+# in, so the copied register_gun would still fill the real GUN_LIBRARY. In the
+# sandbox they are swapped for a version that refuses with a clear message.
+_REFUSED_NAMES: dict[str, tuple[str, ...]] = {
+    "chokepoint.arsenal": ("register_gun", "register_module"),
+}
+
+
+def _read_only(value: object) -> object:
+    """A read-only stand-in for a shared dict or list registry."""
+    if isinstance(value, dict):
+        return types.MappingProxyType(value)
+    if isinstance(value, list):
+        return tuple(value)
+    raise TypeError(f"no read-only form for {type(value).__name__}")
+
+
+def _refuse(func_name: str) -> Callable[..., NoReturn]:
+    """A stand-in for a registration function: calling it raises SafetyError."""
+    def refused(*args: Any, **kwargs: Any) -> NoReturn:
+        raise SafetyError(f"{func_name}() changes the game's shared registry, "
+                          "so loadout code may not call it")
+    return refused
 
 
 def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):  # noqa: A002
@@ -139,15 +166,15 @@ def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):  # n
     if level != 0 or not allowed:
         raise SafetyError(f"import of {name!r} is not allowed")
     module = importlib.import_module(name)
-    read_only = _READ_ONLY_NAMES.get(name)
-    if not read_only:
-        return module
-    # A fresh module object holding a copy of the real one's names, so neither
-    # `from m import X` nor `m.X = ...` can reach the real registry.
+    # Always hand back a fresh module object holding a copy of the real one's
+    # names, so `m.X = ...` only rebinds the copy - never the real module's
+    # constants (e.g. DEFAULT_GATE_COST) that the game itself reads.
     stand_in = types.ModuleType(name)
     stand_in.__dict__.update(module.__dict__)
-    for attr in read_only:
-        setattr(stand_in, attr, types.MappingProxyType(getattr(module, attr)))
+    for attr in _READ_ONLY_NAMES.get(name, ()):
+        setattr(stand_in, attr, _read_only(getattr(module, attr)))
+    for attr in _REFUSED_NAMES.get(name, ()):
+        setattr(stand_in, attr, _refuse(attr))
     return stand_in
 
 

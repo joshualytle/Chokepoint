@@ -798,6 +798,9 @@ async def main() -> None:  # pragma: no cover - needs a display
                     clines.append((("WHY:  " if j == 0 else "      ") + ln, INK))
                 for j, ln in enumerate(wrap(h.fix, pw - 28, F_S)):
                     clines.append((("FIX:  " if j == 0 else "      ") + ln, AMBER))
+                if h.code:  # the fix as Python, for loadout.py (C opens the editor)
+                    clines.append((f"PY:   inside {h.code_in}() in loadout.py:", MUTED))
+                    clines.extend(("      " + ln, PHOS) for ln in h.code.splitlines())
                 if h.concept:
                     clines.append((f"concept: {h.concept}", MUTED))
                 ph = len(clines) * 16 + 14

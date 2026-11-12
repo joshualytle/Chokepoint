@@ -31,6 +31,8 @@ minor versions may still move quickly.
   app.
 
 ### Fixed
+- Turrets now fire at their documented `fire_rate`: the cooldown carries the
+  part of a tick it overshot instead of discarding it (guns ran 2-6% slow).
 - Runaway loadout code (a huge `for` loop, `range(10**15)`, `10 ** 10 ** 10`) is
   stopped with "your code ran too long" instead of freezing the browser tab.
 - A refused edge/node removal no longer reorders a fork's branches (which

@@ -63,6 +63,10 @@ minor versions may still move quickly.
   a read-only view too, so it can't empty the shared registry that way either.
 - The shipped example `loadout.py` uses absolute imports, so it can be pasted
   into the web editor (the sandbox refuses relative imports).
+- Packets stranded by removing a node mid-wave now count as leaked in the
+  per-kind stats and telemetry (not toward game over), so the books balance.
+- Running a lesson's code on desktop now refunds gates and limiters (and
+  modules) along with turrets, so swapping builds no longer loses credits.
 
 ### Notes
 - The desktop build (`python -m chokepoint`) is unchanged and remains the

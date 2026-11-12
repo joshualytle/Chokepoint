@@ -487,9 +487,7 @@ def equip_module_at(x: float, y: float, name: str) -> str:
 def _rebind_after_topology() -> None:
     """Drop only packets stranded by a removed node, then re-snap all devices."""
     assert _world is not None
-    valid = _world.map.nodes
-    _world.packets = [p for p in _world.packets
-                      if p.at in valid and (p.moving_to is None or p.moving_to in valid)]
+    _world.drop_orphaned_packets()   # counted as leaked in stats; never ends the run
     _sync()
 
 

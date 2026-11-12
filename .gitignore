@@ -33,3 +33,6 @@ web/chokepoint.zip
 .env
 .env.*
 !.env.example
+
+# Local tooling ledger (machine-specific, never published). `git add -A` skips it.
+.standards/

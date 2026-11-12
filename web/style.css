@@ -383,6 +383,8 @@ table.kinds tr.gap td { color: var(--danger); }
 .coach-line b { color: var(--muted); font-weight: normal; margin-right: 4px; }
 .coach-fix b { color: var(--amber); }
 .coach-concept { color: var(--muted); margin-top: 6px; font-size: 12px; }
+.coach-code-toggle { margin-top: 6px; padding: 0; font-size: 12px; color: var(--phos); background: none; border: 0; }
+.coach .insp-code { margin-top: 6px; }
 
 /* ---------------------------------------------------------------- editor */
 .editor-wrap { display: flex; flex-direction: column; overflow: hidden; }
